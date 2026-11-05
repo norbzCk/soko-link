@@ -341,6 +341,20 @@ class TestBusinessUpdateOrderStatus:
         db.commit()
         db.refresh(sale)
 
+        db.add(PaymentTransaction(
+            transaction_id="TXN-BUSINESS-PACKED",
+            order_id=sale.id,
+            payer_type="user",
+            payer_id=1,
+            amount=product.price * 2,
+            payment_method="mpesa",
+            provider="mpesa",
+            phone_number="+255700000300",
+            status="completed",
+            message="Payment completed",
+        ))
+        db.commit()
+
         login = login_as(client, "seller@test.com", "TestPass1!")
         token = login.json()["access_token"]
 
@@ -348,6 +362,31 @@ class TestBusinessUpdateOrderStatus:
             "status": "Packed",
         }, headers=auth_header(token))
         assert response.status_code == 200
+
+
+    def test_business_cannot_fulfil_unpaid_order(self, client, db, seller_user, product):
+        sale = Sale(
+            date=date.today(),
+            product=product.name,
+            category=product.category,
+            product_id=product.id,
+            seller_id=seller_user.id,
+            quantity=2,
+            unit_price=product.price,
+            status="Confirmed",
+            created_by=1,
+        )
+        db.add(sale)
+        db.commit()
+        db.refresh(sale)
+
+        login = login_as(client, "seller@test.com", "TestPass1!")
+        token = login.json()["access_token"]
+
+        response = client.patch(f"/business/orders/{sale.id}/status", json={
+            "status": "Packed",
+        }, headers=auth_header(token))
+        assert response.status_code == 400
 
 
 class TestBusinessAssignDelivery:

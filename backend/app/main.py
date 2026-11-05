@@ -95,6 +95,8 @@ def _ensure_schema_columns():
         add_column_if_not_exists("sales", "delivery_notes", "delivery_notes VARCHAR")
         add_column_if_not_exists("sales", "delivery_method", "delivery_method VARCHAR DEFAULT 'Standard'")
 
+        add_column_if_not_exists("orders", "delivery_fee", "delivery_fee DOUBLE PRECISION DEFAULT 0")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

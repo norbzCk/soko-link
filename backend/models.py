@@ -272,6 +272,7 @@ class Order(Base):
     status = Column(String, nullable=False, default="Pending", index=True)
     status_reason = Column(String, nullable=True)
     total_amount = Column(Float, nullable=False, default=0.0)
+    delivery_fee = Column(Float, nullable=False, default=0.0)
     item_count = Column(Integer, nullable=False, default=0)
     delivery_address = Column(String, nullable=True)
     delivery_phone = Column(String, nullable=True)

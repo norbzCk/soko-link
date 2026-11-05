@@ -1,7 +1,5 @@
 import secrets
-import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Header, Request, Response, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials
@@ -23,10 +21,10 @@ from backend.app.auth import hash_password, verify_password, verify_and_upgrade_
 from backend.utils.uploads import save_uploaded_image
 from backend.app.business import get_current_business_user
 from backend.app.notification_service import build_login_email, create_notification, resolve_subject
-from backend.app.order_runtime import ensure_order_thread, log_order_status, record_audit, record_shipment_event, update_reservation_status
+from backend.app.order_runtime import ensure_order_thread, record_audit, record_shipment_event, update_reservation_status
+from backend.app.order_state import sale_has_settled_payment, sync_sale_order_state
 
 router = APIRouter(prefix="/logistics", tags=["Logistics"])
-ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 def _serialize_logistics(user: LogisticsUser, include_email: bool = True) -> dict:
@@ -299,6 +297,8 @@ def login_logistics(
     return {
         "message": "Login successful",
         "token": token,
+        "access_token": token,
+        "token_type": "bearer",
         "user": _serialize_logistics(user)
     }
 
@@ -400,25 +400,8 @@ async def upload_logistics_profile_photo(
     db: Session = Depends(get_db),
 ):
     user = current_user
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_IMAGE_EXT:
-        raise HTTPException(status_code=400, detail="Unsupported image format")
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
-
-    uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"logistics-{user.id}-{uuid.uuid4().hex}{suffix}"
-    destination = uploads_dir / filename
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Empty file")
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
-
-    destination.write_bytes(content)
-    return {"image_url": f"/uploads/{filename}"}
+    image_url = await save_uploaded_image(file)
+    return {"image_url": image_url}
 
 
 @router.post("/change-password")
@@ -510,18 +493,52 @@ def create_delivery_order(
     current_user: LogisticsUser = Depends(get_current_logistics_user),
 ):
     user = current_user
-    
+
+    if payload.order_id is None:
+        raise HTTPException(status_code=400, detail="order_id is required")
+
+    order = db.query(Sale).filter(Sale.id == payload.order_id).with_for_update().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    order_status = (order.status or "").strip().title()
+    if order_status not in {"Confirmed", "Packed", "Ready For Shipping", "Shipped"}:
+        raise HTTPException(
+            status_code=400,
+            detail="A delivery can only be created for an accepted, unfulfilled order",
+        )
+    if not sale_has_settled_payment(db, order.id):
+        raise HTTPException(status_code=400, detail="Delivery can only be created after payment is completed.")
+
+    existing = (
+        db.query(DeliveryOrder)
+        .filter(
+            DeliveryOrder.order_id == order.id,
+            DeliveryOrder.status.notin_(["failed", "cancelled"]),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="This order already has an active delivery")
+
+    seller_id = order.seller_id if order.seller_id is not None else payload.seller_id
+    buyer_id = order.created_by if order.created_by is not None else payload.buyer_id
+    seller = db.query(BusinessUser).filter(BusinessUser.id == seller_id).first() if seller_id else None
+    buyer = db.query(User).filter(User.id == buyer_id).first() if buyer_id else None
+    if payload.price is not None and payload.price < 0:
+        raise HTTPException(status_code=400, detail="Delivery price cannot be negative")
+
     verification_code = secrets.token_hex(4).upper()
-    
+
     delivery = DeliveryOrder(
-        order_id=payload.order_id,
-        seller_id=payload.seller_id,
-        buyer_id=payload.buyer_id,
+        order_id=order.id,
+        seller_id=seller_id,
+        buyer_id=buyer_id,
         logistics_id=user.id,
         pickup_location=payload.pickup_location,
-        delivery_location=payload.delivery_location,
-        pickup_phone=payload.pickup_phone,
-        delivery_phone=payload.delivery_phone,
+        delivery_location=payload.delivery_location or order.delivery_address,
+        pickup_phone=payload.pickup_phone or (seller.phone if seller else None),
+        delivery_phone=payload.delivery_phone or order.delivery_phone,
         price=payload.price,
         status="assigned",
         verification_code=verification_code,
@@ -539,10 +556,7 @@ def create_delivery_order(
     delivery.tracking_updated_at = datetime.utcnow()
     db.add(delivery)
     db.flush()
-    order = db.query(Sale).filter(Sale.id == payload.order_id).first() if payload.order_id else None
     linked_order = _linked_order_model(db, order)
-    buyer = db.query(User).filter(User.id == payload.buyer_id).first() if payload.buyer_id else None
-    seller = db.query(BusinessUser).filter(BusinessUser.id == payload.seller_id).first() if payload.seller_id else None
     ensure_order_thread(db, order=linked_order, sale=order, seller=seller, buyer=buyer, logistics=user)
     record_shipment_event(
         db,
@@ -763,20 +777,16 @@ def update_delivery_status(
         delivery.last_location_name = payload.current_location or "Package collected"
         if order and (order.status or "").strip().title() not in {"Cancelled", "Received"}:
             order.status = "Shipped"
+            order.status_reason = "Picked up by logistics partner"
             db.add(order)
-            if linked_order:
-                linked_order.status = "Shipped"
-                linked_order.status_reason = "Picked up by logistics partner"
-                db.add(linked_order)
-                log_order_status(
-                    db,
-                    order_id=linked_order.id,
-                    sale_id=order.id,
-                    status="Shipped",
-                    reason="Picked up by logistics partner",
-                    actor=user,
-                    metadata={"source": "logistics.status", "delivery_id": delivery.id},
-                )
+            sync_sale_order_state(
+                db,
+                order,
+                status="Shipped",
+                reason=order.status_reason,
+                actor=user,
+                metadata={"source": "logistics.status", "delivery_id": delivery.id},
+            )
     elif payload.status == "in_transit":
         current_coords = interpolate_coords(pickup_coords, destination_coords, 0.7)
         delivery.current_lat = payload.current_lat if payload.current_lat is not None else current_coords[0]
@@ -784,20 +794,16 @@ def update_delivery_status(
         delivery.last_location_name = payload.current_location or "In transit"
         if order and (order.status or "").strip().title() not in {"Cancelled", "Received"}:
             order.status = "Shipped"
+            order.status_reason = "Shipment in transit"
             db.add(order)
-            if linked_order:
-                linked_order.status = "Shipped"
-                linked_order.status_reason = "Shipment in transit"
-                db.add(linked_order)
-                log_order_status(
-                    db,
-                    order_id=linked_order.id,
-                    sale_id=order.id,
-                    status="Shipped",
-                    reason="Shipment in transit",
-                    actor=user,
-                    metadata={"source": "logistics.status", "delivery_id": delivery.id},
-                )
+            sync_sale_order_state(
+                db,
+                order,
+                status="Shipped",
+                reason=order.status_reason,
+                actor=user,
+                metadata={"source": "logistics.status", "delivery_id": delivery.id},
+            )
     elif payload.status == "delivered":
         delivery.delivered_at = datetime.utcnow()
         delivery.failed_at = None
@@ -814,19 +820,15 @@ def update_delivery_status(
             order.status_reason = "Delivered by logistics partner"
             db.add(order)
             if linked_order:
-                linked_order.status = "Received"
-                linked_order.status_reason = "Delivered by logistics partner"
-                db.add(linked_order)
                 update_reservation_status(db, order_id=linked_order.id, status="consumed")
-                log_order_status(
-                    db,
-                    order_id=linked_order.id,
-                    sale_id=order.id,
-                    status="Received",
-                    reason="Delivered by logistics partner",
-                    actor=user,
-                    metadata={"source": "logistics.status", "delivery_id": delivery.id},
-                )
+            sync_sale_order_state(
+                db,
+                order,
+                status="Received",
+                reason=order.status_reason,
+                actor=user,
+                metadata={"source": "logistics.status", "delivery_id": delivery.id},
+            )
         
         metrics = db.query(LogisticsMetrics).filter(LogisticsMetrics.logistics_id == user.id).first()
         if metrics:
@@ -846,19 +848,14 @@ def update_delivery_status(
             order.status = "Delivery Failed"
             order.status_reason = delivery.failure_reason
             db.add(order)
-            if linked_order:
-                linked_order.status = "Delivery Failed"
-                linked_order.status_reason = delivery.failure_reason
-                db.add(linked_order)
-                log_order_status(
-                    db,
-                    order_id=linked_order.id,
-                    sale_id=order.id,
-                    status="Delivery Failed",
-                    reason=delivery.failure_reason,
-                    actor=user,
-                    metadata={"source": "logistics.status", "delivery_id": delivery.id},
-                )
+            sync_sale_order_state(
+                db,
+                order,
+                status="Delivery Failed",
+                reason=order.status_reason,
+                actor=user,
+                metadata={"source": "logistics.status", "delivery_id": delivery.id},
+            )
 
         metrics = db.query(LogisticsMetrics).filter(LogisticsMetrics.logistics_id == user.id).first()
         if metrics:
@@ -1096,7 +1093,6 @@ def rate_delivery(
         ratings = [r.rating for r in all_ratings if r.rating]
         if ratings:
             metrics.rating = round(sum(ratings) / len(ratings), 2)
-            metrics.total_deliveries = len(ratings)
         db.add(metrics)
     
     db.commit()

@@ -1,5 +1,4 @@
 import secrets
-import uuid
 from datetime import datetime, timedelta, date, timezone
 import os
 from pathlib import Path
@@ -45,11 +44,11 @@ from backend.app.marketplace_intelligence import (
     haversine_km,
     refresh_business_metrics,
 )
+from backend.app.order_state import TRANSITIONS, sale_has_settled_payment, sync_sale_order_state
 
 from backend.analysis import sales_analysis
 
 router = APIRouter(prefix="/business", tags=["Business"])
-ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 def get_current_business_user(
@@ -487,6 +486,8 @@ def login_business(
     return {
         "message": "Login successful",
         "token": token,
+        "access_token": token,
+        "token_type": "bearer",
         "user": _serialize_business(user)
     }
 
@@ -505,25 +506,8 @@ async def upload_business_profile_photo(
     db: Session = Depends(get_db),
 ):
     user = current_user
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_IMAGE_EXT:
-        raise HTTPException(status_code=400, detail="Unsupported image format")
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
-
-    uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"business-{user.id}-{uuid.uuid4().hex}{suffix}"
-    destination = uploads_dir / filename
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Empty file")
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
-
-    destination.write_bytes(content)
-    return {"image_url": f"/uploads/{filename}"}
+    image_url = await save_uploaded_image(file)
+    return {"image_url": image_url}
 
 
 @router.put("/me")
@@ -868,32 +852,14 @@ def _sync_business_order_state(
     actor: BusinessUser | LogisticsUser | User | None,
     metadata: dict | None = None,
 ) -> None:
-    linked_order = _linked_order_model(db, sale)
-    linked_items = _linked_order_items(db, sale, linked_order)
-    for linked_item in linked_items:
-        linked_item.status = status
-        db.add(linked_item)
-    if linked_order:
-        linked_order.status = status
-        linked_order.status_reason = reason
-        db.add(linked_order)
-        log_order_status(
-            db,
-            order_id=linked_order.id,
-            sale_id=sale.id,
-            status=status,
-            reason=reason,
-            actor=actor,
-            metadata=metadata,
-        )
-        record_audit(
-            db,
-            actor=actor,
-            entity_type="order",
-            entity_id=linked_order.id,
-            action=f"order.status.{status.lower().replace(' ', '_')}",
-            details={"sale_id": sale.id, "reason": reason, **(metadata or {})},
-        )
+    sync_sale_order_state(
+        db,
+        sale,
+        status=status,
+        reason=reason,
+        actor=actor,
+        metadata=metadata,
+    )
 
 
 def _notify_order_participants(
@@ -1262,19 +1228,15 @@ def business_update_order_status(
 
     target = (payload.get("status") or "").strip().title()
     reason = (payload.get("reason") or "").strip() or None
-    valid = {
-        "Pending": {"Confirmed", "Cancelled"},
-        "Confirmed": {"Packed", "Cancelled"},
-        "Packed": {"Ready For Shipping", "Cancelled"},
-        "Ready For Shipping": {"Shipped", "Cancelled"},
-        "Shipped": set(),
-        "Delivery Failed": {"Ready For Shipping", "Cancelled"},
-        "Received": set(),
-        "Cancelled": set(),
-    }
     current = (order.status or "Pending").strip().title()
-    if target not in valid.get(current, set()):
+    if target not in TRANSITIONS.get(current, set()):
         raise HTTPException(status_code=400, detail=f"Cannot move order from {current} to {target}")
+
+    if target in {"Packed", "Ready For Shipping", "Shipped"} and not sale_has_settled_payment(db, order.id):
+        raise HTTPException(
+            status_code=400,
+            detail="Payment must be completed before the order can be fulfilled.",
+        )
 
     order.status = target
     order.status_reason = reason
@@ -1330,11 +1292,7 @@ def business_assign_delivery(
     if (order.status or "").strip().title() in {"Cancelled", "Received"}:
         raise HTTPException(status_code=400, detail="Delivery cannot be assigned to a finalized order.")
 
-    paid = db.query(PaymentTransaction).filter(
-        PaymentTransaction.order_id == order.id,
-        PaymentTransaction.status == "completed"
-    ).first()
-    if not paid:
+    if not sale_has_settled_payment(db, order.id):
         raise HTTPException(status_code=400, detail="Delivery can only be assigned after payment is completed.")
 
     logistics_id = payload.get("logistics_id")

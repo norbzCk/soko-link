@@ -31,6 +31,8 @@ interface AuthContextValue {
   refreshUser: () => Promise<SessionUser | null>;
   verifyEmail: (token: string) => Promise<void>;
   resendConfirmationEmail: (email: string) => Promise<void>;
+  sendSmsOtp: (phone: string) => Promise<unknown>;
+  verifySmsOtp: (phone: string, token: string) => Promise<SessionUser | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -465,7 +467,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, login, register, logout, refreshUser, verifyEmail, resendConfirmationEmail }}
+      value={{ user, token, loading, login, register, logout, refreshUser, verifyEmail, resendConfirmationEmail, sendSmsOtp, verifySmsOtp }}
     >
       {children}
     </AuthContext.Provider>

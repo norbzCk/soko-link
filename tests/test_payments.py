@@ -474,6 +474,65 @@ class TestConfirmTransaction:
         assert response.status_code == 400
 
 
+    def test_cannot_reverse_completed_payment(self, client, db, buyer_user, product, seller_user):
+        admin = User(
+            name="Admin User",
+            email="admin2@test.com",
+            phone="+255700000101",
+            password_hash=hash_password("AdminPass1!"),
+            role="super_admin",
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(admin)
+        db.commit()
+        db.refresh(admin)
+
+        sale = Sale(
+            date=date.today(),
+            product=product.name,
+            category=product.category,
+            product_id=product.id,
+            seller_id=seller_user.id,
+            quantity=2,
+            unit_price=product.price,
+            status="Pending",
+            created_by=buyer_user.id,
+        )
+        db.add(sale)
+        db.commit()
+        db.refresh(sale)
+
+        txn = PaymentTransaction(
+            transaction_id="TXN-FINALIZED",
+            order_id=sale.id,
+            payer_type="user",
+            payer_id=buyer_user.id,
+            amount=10000.0,
+            payment_method="mpesa",
+            provider="mpesa",
+            phone_number="+255700000300",
+            status="completed",
+            message="Payment completed",
+        )
+        db.add(txn)
+        db.commit()
+
+        login = login_as(client, "admin2@test.com", "AdminPass1!")
+        token = login.json()["access_token"]
+
+        response = client.post(f"/payments/transaction/{txn.transaction_id}/confirm", json={
+            "status": "failed",
+        }, headers=auth_header(token))
+        assert response.status_code == 400
+
+        idempotent = client.post(f"/payments/transaction/{txn.transaction_id}/confirm", json={
+            "status": "completed",
+        }, headers=auth_header(token))
+        assert idempotent.status_code == 200
+        assert idempotent.json()["status"] == "completed"
+
+
 class TestGetTransaction:
     def test_get_transaction_status(self, client, db, buyer_user, product, seller_user):
         sale = Sale(
@@ -516,6 +575,113 @@ class TestGetTransaction:
         data = response.json()
         assert data["transaction_id"] == txn.transaction_id
         assert data["status"] == "completed"
+
+
+    def test_user_cannot_view_other_users_transaction(self, client, db, buyer_user, product, seller_user):
+        other_buyer = User(
+            name="Other Buyer",
+            email="other_buyer@test.com",
+            phone="+255700000900",
+            password_hash=hash_password("TestPass1!"),
+            role="user",
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_buyer)
+        db.commit()
+        db.refresh(other_buyer)
+
+        sale = Sale(
+            date=date.today(),
+            product=product.name,
+            category=product.category,
+            product_id=product.id,
+            seller_id=seller_user.id,
+            quantity=2,
+            unit_price=product.price,
+            status="Pending",
+            created_by=buyer_user.id,
+        )
+        db.add(sale)
+        db.commit()
+        db.refresh(sale)
+
+        txn = PaymentTransaction(
+            transaction_id="TXN-PRIVATE-STATUS",
+            order_id=sale.id,
+            payer_type="user",
+            payer_id=buyer_user.id,
+            amount=10000.0,
+            payment_method="mpesa",
+            provider="mpesa",
+            phone_number="+255700000300",
+            status="pending",
+            message="Payment initiated",
+        )
+        db.add(txn)
+        db.commit()
+
+        login = login_as(client, "other_buyer@test.com", "TestPass1!")
+        token = login.json()["access_token"]
+
+        response = client.get(
+            f"/payments/transaction/{txn.transaction_id}",
+            headers=auth_header(token),
+        )
+        assert response.status_code == 403
+
+    def test_user_cannot_poll_other_users_transaction(self, client, db, buyer_user, product, seller_user):
+        other_buyer = User(
+            name="Other Buyer",
+            email="other_buyer2@test.com",
+            phone="+255700000901",
+            password_hash=hash_password("TestPass1!"),
+            role="user",
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_buyer)
+        db.commit()
+        db.refresh(other_buyer)
+
+        sale = Sale(
+            date=date.today(),
+            product=product.name,
+            category=product.category,
+            product_id=product.id,
+            seller_id=seller_user.id,
+            quantity=2,
+            unit_price=product.price,
+            status="Pending",
+            created_by=buyer_user.id,
+        )
+        db.add(sale)
+        db.commit()
+        db.refresh(sale)
+
+        txn = PaymentTransaction(
+            transaction_id="TXN-PRIVATE-POLL",
+            order_id=sale.id,
+            payer_type="user",
+            payer_id=buyer_user.id,
+            amount=10000.0,
+            payment_method="mpesa",
+            provider="mpesa",
+            phone_number="+255700000300",
+            status="processing",
+            message="Processing",
+        )
+        db.add(txn)
+        db.commit()
+
+        login = login_as(client, "other_buyer2@test.com", "TestPass1!")
+        token = login.json()["access_token"]
+
+        response = client.post(
+            f"/payments/mobile-money/mpesa/poll/{txn.transaction_id}",
+            headers=auth_header(token),
+        )
+        assert response.status_code == 403
 
 
 class TestPaymentHistory:

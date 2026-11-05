@@ -16,6 +16,14 @@ from backend.app.order_runtime import (
     reserve_inventory,
     update_reservation_status,
 )
+from backend.app.order_state import (
+    CANCELLABLE_BY_CUSTOMER,
+    ORDER_STATUSES,
+    TRANSITIONS,
+    normalize_status,
+    requested_status,
+    sync_sale_order_state,
+)
 from backend.database import get_db
 from backend.models import (
     BusinessUser,
@@ -32,27 +40,7 @@ from backend.models import (
 
 router = APIRouter(tags=["Sales", "Orders"])
 
-ORDER_STATUSES = {
-    "Pending",
-    "Confirmed",
-    "Packed",
-    "Ready For Shipping",
-    "Shipped",
-    "Delivery Failed",
-    "Received",
-    "Cancelled",
-}
-ADMIN_TRANSITIONS = {
-    "Pending": {"Confirmed", "Cancelled"},
-    "Confirmed": {"Packed", "Cancelled"},
-    "Packed": {"Ready For Shipping", "Cancelled"},
-    "Ready For Shipping": {"Shipped", "Cancelled"},
-    "Shipped": set(),
-    "Delivery Failed": set(),
-    "Received": set(),
-    "Cancelled": set(),
-}
-CANCELLABLE_BY_CUSTOMER = {"Pending", "Confirmed"}
+ADMIN_TRANSITIONS = TRANSITIONS
 DELIVERY_METHODS = {"Standard", "Express", "Pickup"}
 
 
@@ -77,23 +65,8 @@ def _sales_query_for_current_user(db: Session, current: User):
     return query
 
 
-def _normalized_status(raw_status: str | None) -> str:
-    status = (raw_status or "").strip().title()
-    if status == "Delivered":
-        # Keep compatibility with old records.
-        return "Received"
-    if status in ORDER_STATUSES:
-        return status
-    return "Received"
-
-
-def _requested_status(raw_status: str | None) -> str | None:
-    status = (raw_status or "").strip().title()
-    if status == "Delivered":
-        return "Received"
-    if status in ORDER_STATUSES:
-        return status
-    return None
+_normalized_status = normalize_status
+_requested_status = requested_status
 
 
 def _linked_order(db: Session, sale: Sale) -> Order | None:
@@ -165,37 +138,22 @@ def _sync_order_state(
     actor: User | BusinessUser | LogisticsUser | None,
     metadata: dict | None = None,
 ) -> None:
-    linked_order = _linked_order(db, sale)
-    linked_items = _linked_order_items(db, sale, linked_order)
-    for linked_item in linked_items:
-        linked_item.status = status
-        db.add(linked_item)
-
-    if linked_order:
-        linked_order.status = status
-        linked_order.status_reason = reason
-        db.add(linked_order)
-        log_order_status(
-            db,
-            order_id=linked_order.id,
-            sale_id=sale.id,
-            status=status,
-            reason=reason,
-            actor=actor,
-            metadata=metadata,
-        )
-        record_audit(
-            db,
-            actor=actor,
-            entity_type="order",
-            entity_id=linked_order.id,
-            action=f"order.status.{status.lower().replace(' ', '_')}",
-            details={"sale_id": sale.id, "reason": reason, **(metadata or {})},
-        )
+    sync_sale_order_state(
+        db,
+        sale,
+        status=status,
+        reason=reason,
+        actor=actor,
+        metadata=metadata,
+    )
 
 
-def _serialize_order(s: Sale) -> dict:
+def _serialize_order(s: Sale, db: Session | None = None) -> dict:
     status = _normalized_status(s.status)
+    items_total = round(float((s.quantity or 0) * (s.unit_price or 0)), 2)
+    linked_order = _linked_order(db, s) if db is not None else None
+    delivery_fee = round(float(linked_order.delivery_fee or 0), 2) if linked_order else 0.0
+    total = round(float(linked_order.total_amount or 0), 2) if linked_order else items_total
     return {
         "id": s.id,
         "order_date": s.date.isoformat() if s.date else None,
@@ -206,7 +164,9 @@ def _serialize_order(s: Sale) -> dict:
         "seller_id": s.seller_id,
         "quantity": s.quantity,
         "unit_price": s.unit_price,
-        "total": (s.quantity or 0) * (s.unit_price or 0),
+        "subtotal": items_total,
+        "delivery_fee": delivery_fee,
+        "total": total,
         "status": status,
         "status_reason": s.status_reason,
         "rating": s.rating,
@@ -425,7 +385,7 @@ def get_orders(
 ):
     query = _sales_query_for_current_user(db, current)
     sales = query.order_by(Sale.date.desc(), Sale.id.desc()).all()
-    return [_serialize_order(s) for s in sales]
+    return [_serialize_order(s, db) for s in sales]
 
 
 @router.post("/orders/", status_code=201)
@@ -462,7 +422,7 @@ def create_order(
             )
             if existing_sales:
                 return {
-                    "orders": [_serialize_order(item) for item in existing_sales],
+                    "orders": [_serialize_order(item, db) for item in existing_sales],
                     "created_group_count": len(existing_sales),
                     "reused": True,
                 }
@@ -547,10 +507,16 @@ def create_order(
         )
         primary_product = items[0]["product"]
         total_quantity = sum(int(item["quantity"]) for item in items)
-        total_amount = round(
+        items_total = round(
             sum(float(item["product"].price or 0) * int(item["quantity"]) for item in items),
             2,
         )
+        delivery_fee = 0.0
+        if delivery_method == "Express":
+            delivery_fee = 5000.0
+        elif delivery_method != "Pickup":
+            delivery_fee = 2000.0
+        total_amount = round(items_total + delivery_fee, 2)
         item_count = len(items)
         average_unit_price = round(total_amount / total_quantity, 4) if total_quantity else 0.0
         categories = sorted({str(item["product"].category or "").strip() for item in items if item["product"].category})
@@ -573,6 +539,7 @@ def create_order(
             primary_seller_id=getattr(primary_product, "seller_id", None),
             status=initial_status,
             total_amount=total_amount,
+            delivery_fee=delivery_fee,
             item_count=item_count,
             delivery_address=delivery_address,
             delivery_phone=delivery_phone,
@@ -669,6 +636,8 @@ def create_order(
             details={
                 "sale_id": model.id,
                 "item_count": item_count,
+                "items_total": items_total,
+                "delivery_fee": delivery_fee,
                 "total_amount": total_amount,
             },
         )
@@ -696,7 +665,7 @@ def create_order(
     for item in created_sales:
         db.refresh(item)
     return {
-        "orders": [_serialize_order(item) for item in created_sales],
+        "orders": [_serialize_order(item, db) for item in created_sales],
         "created_group_count": len(created_sales),
         "reused": False,
     }
@@ -722,7 +691,7 @@ def update_order_status(
 
     current_status = _normalized_status(order.status)
     if target_status == current_status:
-        return _serialize_order(order)
+        return _serialize_order(order, db)
 
     if target_status not in ADMIN_TRANSITIONS.get(current_status, set()):
         raise HTTPException(
@@ -780,7 +749,7 @@ def update_order_status(
     )
     db.commit()
     db.refresh(order)
-    return _serialize_order(order)
+    return _serialize_order(order, db)
 
 
 @router.post("/orders/{order_id}/receive")
@@ -824,7 +793,7 @@ def confirm_received(
     )
     db.commit()
     db.refresh(order)
-    return _serialize_order(order)
+    return _serialize_order(order, db)
 
 
 @router.post("/orders/{order_id}/cancel")
@@ -867,7 +836,7 @@ def cancel_order(
     )
     db.commit()
     db.refresh(order)
-    return _serialize_order(order)
+    return _serialize_order(order, db)
 
 
 @router.post("/orders/{order_id}/rating")
@@ -916,7 +885,7 @@ def rate_order(
 
     db.commit()
     db.refresh(order)
-    return _serialize_order(order)
+    return _serialize_order(order, db)
 
 
 @router.get("/orders/{order_id}/tracking")

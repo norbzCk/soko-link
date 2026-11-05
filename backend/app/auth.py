@@ -7,7 +7,6 @@ import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import jwt
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
@@ -34,8 +33,9 @@ SUPERADMIN_PASSWORD = os.getenv("SUPERADMIN_PASSWORD", "adminkey")
 security = HTTPBearer(auto_error=False)
 limiter = Limiter(key_func=get_remote_address)
 
+from backend.utils.uploads import save_uploaded_image
+
 router = APIRouter(prefix="/auth", tags=["Auth"])
-ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 def _normalize_role(value: str | None) -> str:
@@ -956,21 +956,8 @@ async def upload_profile_photo(
     file: UploadFile = File(...),
     current: User = Depends(get_current_user),
 ):
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_IMAGE_EXT:
-        raise HTTPException(status_code=400, detail="Unsupported image format")
-
-    uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"profile-{current.id}-{uuid.uuid4().hex}{suffix}"
-    destination = uploads_dir / filename
-
-    content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
-
-    destination.write_bytes(content)
-    return {"image_url": f"/uploads/{filename}"}
+    image_url = await save_uploaded_image(file)
+    return {"image_url": image_url}
 
 
 @router.post("/change-password")

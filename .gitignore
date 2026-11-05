@@ -17,7 +17,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.sqlitegit rm --cached sokolink.db3
+*.sqlite
+*.db
 
 # Virtual environments
 venv/

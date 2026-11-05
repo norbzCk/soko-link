@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from backend.app.main import app
 from backend.database import SessionLocal, engine
 from backend.models import Base
-from backend.models import User, BusinessUser, LogisticsUser, Product, Provider, Sale, BusinessMetrics, LogisticsMetrics, DeliveryOrder
+from backend.models import User, BusinessUser, LogisticsUser, Product, Provider, Sale, BusinessMetrics, LogisticsMetrics, DeliveryOrder, PaymentTransaction
 from backend.app.auth import hash_password
 from datetime import date, datetime
 
@@ -199,6 +199,20 @@ class TestCreateDeliveryOrder:
         db.commit()
         db.refresh(sale)
 
+        db.add(PaymentTransaction(
+            transaction_id="TXN-LOGISTICS-CREATE",
+            order_id=sale.id,
+            payer_type="user",
+            payer_id=buyer_user.id,
+            amount=product.price * 2,
+            payment_method="mpesa",
+            provider="mpesa",
+            phone_number="+255700000300",
+            status="completed",
+            message="Payment completed",
+        ))
+        db.commit()
+
         login = login_as(client, "logistics@test.com", "TestPass1!")
         token = login.json()["access_token"]
 
@@ -216,6 +230,105 @@ class TestCreateDeliveryOrder:
         data = response.json()
         assert "delivery" in data
         assert data["delivery"]["status"] == "assigned"
+
+
+    def test_delivery_creation_ignores_spoofed_participants(self, client, db, logistics_user, product, seller_user, buyer_user):
+        sale = Sale(
+            date=date.today(),
+            product=product.name,
+            category=product.category,
+            product_id=product.id,
+            seller_id=seller_user.id,
+            quantity=2,
+            unit_price=product.price,
+            status="Confirmed",
+            created_by=buyer_user.id,
+        )
+        db.add(sale)
+        db.commit()
+        db.refresh(sale)
+
+        db.add(PaymentTransaction(
+            transaction_id="TXN-LOGISTICS-SPOOF",
+            order_id=sale.id,
+            payer_type="user",
+            payer_id=buyer_user.id,
+            amount=product.price * 2,
+            payment_method="mpesa",
+            provider="mpesa",
+            phone_number="+255700000300",
+            status="completed",
+            message="Payment completed",
+        ))
+        db.commit()
+
+        login = login_as(client, "logistics@test.com", "TestPass1!")
+        token = login.json()["access_token"]
+
+        response = client.post("/logistics/deliveries", json={
+            "order_id": sale.id,
+            "seller_id": 99999,
+            "buyer_id": 99999,
+            "pickup_location": "Kariakoo Market",
+            "delivery_location": "Ubungo, Dar es Salaam",
+            "price": 2000.0,
+        }, headers=auth_header(token))
+        assert response.status_code == 200
+
+        delivery = db.query(DeliveryOrder).filter(DeliveryOrder.order_id == sale.id).one()
+        assert delivery.seller_id == seller_user.id
+        assert delivery.buyer_id == buyer_user.id
+
+    def test_delivery_creation_rejects_duplicate_active_delivery(self, client, db, logistics_user, product, seller_user, buyer_user):
+        sale = Sale(
+            date=date.today(),
+            product=product.name,
+            category=product.category,
+            product_id=product.id,
+            seller_id=seller_user.id,
+            quantity=2,
+            unit_price=product.price,
+            status="Confirmed",
+            created_by=buyer_user.id,
+        )
+        db.add(sale)
+        db.commit()
+        db.refresh(sale)
+
+        db.add(DeliveryOrder(
+            order_id=sale.id,
+            seller_id=seller_user.id,
+            buyer_id=buyer_user.id,
+            logistics_id=logistics_user.id,
+            pickup_location="Kariakoo Market",
+            delivery_location="Ubungo, Dar es Salaam",
+            status="assigned",
+        ))
+        db.commit()
+
+        db.add(PaymentTransaction(
+            transaction_id="TXN-LOGISTICS-DUPLICATE",
+            order_id=sale.id,
+            payer_type="user",
+            payer_id=buyer_user.id,
+            amount=product.price * 2,
+            payment_method="mpesa",
+            provider="mpesa",
+            phone_number="+255700000300",
+            status="completed",
+            message="Payment completed",
+        ))
+        db.commit()
+
+        login = login_as(client, "logistics@test.com", "TestPass1!")
+        token = login.json()["access_token"]
+
+        response = client.post("/logistics/deliveries", json={
+            "order_id": sale.id,
+            "pickup_location": "Kariakoo Market",
+            "delivery_location": "Ubungo, Dar es Salaam",
+        }, headers=auth_header(token))
+        assert response.status_code == 400
 
 
 class TestUpdateDeliveryStatus:

@@ -134,6 +134,8 @@ export function CheckoutPage() {
     return formData.delivery_method === "Express" ? sellerGroupCount * 5000 : sellerGroupCount * 2000;
   }, [formData.delivery_method, sellerGroupCount]);
 
+  const grandTotal = total + estimatedDeliveryFee;
+
   async function handleConfirmOrder() {
     if (!checkoutItems.length) return;
     setSubmitting(true);
@@ -375,7 +377,7 @@ export function CheckoutPage() {
                       placeholder="+255..."
                     />
                   </label>
-                  <p className="text-[10px] font-medium text-text-muted italic">You will receive a prompt on your phone to authorize the payment of {formatMoney(total)}.</p>
+                  <p className="text-[10px] font-medium text-text-muted italic">You will receive a prompt on your phone to authorize the payment of {formatMoney(grandTotal)}.</p>
                 </motion.div>
               )}
             </div>
@@ -414,9 +416,9 @@ export function CheckoutPage() {
                   <span>{formatMoney(estimatedDeliveryFee)}</span>
                 </div>
                 <div className="flex justify-between pt-4 border-t border-border">
-                  <span className="text-lg font-black text-text uppercase tracking-tight">Items Total</span>
+                  <span className="text-lg font-black text-text uppercase tracking-tight">Total</span>
                   <span className="text-2xl font-display font-black text-brand tracking-tight">
-                    {formatMoney(total)}
+                    {formatMoney(grandTotal)}
                   </span>
                 </div>
               </div>

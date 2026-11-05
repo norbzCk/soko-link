@@ -1,11 +1,12 @@
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 from backend.app.auth import get_current_user, require_roles
 from backend.app.notification_service import create_notification, resolve_subject
+from backend.app.order_state import normalize_status, sync_sale_order_state
 from backend.app.payment_providers import PaymentProviderError, get_provider
 from backend.app.schemas import PaymentRequest, PaymentResponse, PaymentMethod
 from backend.database import get_db
@@ -145,6 +146,24 @@ def _payable_order_total(db: Session, sale: Sale) -> float:
     if linked_order:
         return round(float(linked_order.total_amount or 0), 2)
     return round(float((sale.unit_price or 0) * (sale.quantity or 0)), 2)
+
+
+def _confirm_order_after_payment(db: Session, order: Sale, actor) -> None:
+    """Payment confirms a still-pending order, but must never skip the seller's
+    own fulfilment steps (packing, ready-for-shipping, handoff)."""
+    if normalize_status(order.status) != "Pending":
+        return
+    order.status = "Confirmed"
+    order.status_reason = "Payment received"
+    db.add(order)
+    sync_sale_order_state(
+        db,
+        order,
+        status="Confirmed",
+        reason="Payment received",
+        actor=actor,
+        metadata={"source": "payment"},
+    )
 
 
 def _reused_payment_transaction(
@@ -295,13 +314,6 @@ def initiate_payment(
             message=f"Payment initiated via {payload.payment_method}",
         )
     )
-
-    # Auto-progress order status for immediate payment methods (e.g., cash on delivery)
-    if status != "pending":
-        current_status = (order.status or "").strip().title()
-        if current_status == "Pending":
-            order.status = "Confirmed"
-            db.add(order)
 
     _notify_payment_parties(
         db,
@@ -518,15 +530,10 @@ def _apply_provider_webhook(
         )
     )
 
-    if order and webhook_result.status == "completed":
-        current_status = (order.status or "").strip().title()
-        if current_status == "Pending":
-            order.status = "Confirmed"
-        elif current_status == "Confirmed":
-            order.status = "Packed"
-        db.add(order)
-
     buyer = db.query(User).filter(User.id == txn.payer_id).first() if order and txn.payer_type == "user" else None
+    if order and webhook_result.status == "completed":
+        _confirm_order_after_payment(db, order, buyer)
+
     if order and buyer:
         _notify_payment_parties(
             db,
@@ -544,15 +551,24 @@ def _apply_provider_webhook(
     return {"status": "processed", "transaction_id": txn.transaction_id, "transaction_status": txn.status}
 
 
+def _can_access_transaction(current: User, txn: PaymentTransaction) -> bool:
+    if current.role in {"admin", "super_admin", "owner"}:
+        return True
+    payer_type, payer_id, _, _ = resolve_subject(current)
+    return str(txn.payer_type) == str(payer_type) and str(txn.payer_id) == str(payer_id)
+
+
 @router.get("/transaction/{transaction_id}")
 def get_transaction_status(
     transaction_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current: User = Depends(get_current_user),
 ):
     txn = db.query(PaymentTransaction).filter(PaymentTransaction.transaction_id == transaction_id).first()
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    if not _can_access_transaction(current, txn):
+        raise HTTPException(status_code=403, detail="You do not have access to this transaction")
     return _serialize_transaction(txn)
 
 
@@ -576,9 +592,14 @@ def confirm_transaction(
     if status not in {"completed", "failed"}:
         raise HTTPException(status_code=400, detail="Invalid status")
 
+    if txn.status == status:
+        return _serialize_transaction(txn)
+    if txn.status in {"completed", "failed"}:
+        raise HTTPException(status_code=400, detail="Transaction has already been finalized")
+
     txn.status = status
     txn.message = (payload or {}).get("message") or ("Payment confirmed successfully" if status == "completed" else "Payment failed")
-    txn.confirmed_at = datetime.utcnow() if status == "completed" else None
+    txn.confirmed_at = datetime.now(timezone.utc) if status == "completed" else None
     db.add(txn)
     linked_order = _linked_order_model(db, order)
     db.add(
@@ -597,13 +618,7 @@ def confirm_transaction(
 
     buyer = db.query(User).filter(User.id == int(order.created_by)).first() if order.created_by is not None else None
     if status == "completed":
-        # Automatically progress order status after payment
-        current_status = (order.status or "").strip().title()
-        if current_status == "Pending":
-            order.status = "Confirmed"
-        elif current_status == "Confirmed":
-            order.status = "Packed"  # Auto-progress to packing after payment
-        db.add(order)
+        _confirm_order_after_payment(db, order, current)
 
     if buyer:
         _notify_payment_parties(
@@ -717,7 +732,7 @@ def poll_mobile_money_status(
     transaction_id: str,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current: User = Depends(get_current_user),
 ):
     """Manual/scheduled fallback for providers (Airtel Money in particular)
     that don't reliably deliver webhooks for every merchant account. Safe to
@@ -725,6 +740,10 @@ def poll_mobile_money_status(
     txn = db.query(PaymentTransaction).filter(PaymentTransaction.transaction_id == transaction_id).first()
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    if not _can_access_transaction(current, txn):
+        raise HTTPException(status_code=403, detail="You do not have access to this transaction")
+    if provider != (txn.provider or txn.payment_method):
+        raise HTTPException(status_code=400, detail="Provider does not match this transaction")
     if txn.status not in {"processing", "pending"}:
         return _serialize_transaction(txn)
 
