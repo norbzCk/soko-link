@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.app.auth import limiter
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.services.identity.auth import limiter
 
 
 @pytest.fixture(autouse=True)

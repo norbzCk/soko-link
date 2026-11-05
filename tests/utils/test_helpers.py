@@ -1,5 +1,5 @@
-from backend.models import User, BusinessUser, LogisticsUser, Product, Provider, Sale, Order, OrderItem, PaymentTransaction, DeliveryOrder, Dispute, RFQ, Notification, BusinessMetrics, LogisticsMetrics, InventoryReservation, ConversationThread, ConversationMessage
-from backend.app.auth import hash_password
+from backend.shared.models import User, BusinessUser, LogisticsUser, Product, Provider, Sale, Order, OrderItem, PaymentTransaction, DeliveryOrder, Dispute, RFQ, Notification, BusinessMetrics, LogisticsMetrics, InventoryReservation, ConversationThread, ConversationMessage
+from backend.services.identity.auth import hash_password
 from datetime import date, datetime
 
 

@@ -1,12 +1,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, Order, OrderItem
-from backend.app.auth import hash_password, create_access_token
-from backend.app.notification_service import create_notification, resolve_subject
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.shared.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, Order, OrderItem
+from backend.services.identity.auth import hash_password, create_access_token
+from backend.services.notifications.notification_service import create_notification, resolve_subject
 
 
 @pytest.fixture(autouse=True)
@@ -372,8 +372,8 @@ class TestProductReactivate:
         assert updated.is_active is True
 
     def test_seller_cannot_reactivate_other_sellers_product(self, client, db, seller_user, product):
-        from backend.models import BusinessUser
-        from backend.app.auth import hash_password
+        from backend.shared.models import BusinessUser
+        from backend.services.identity.auth import hash_password
 
         rival = BusinessUser(
             business_name="Rival Co",

@@ -8,7 +8,7 @@ Create Date: 2026-04-28
 from alembic import op
 import sqlalchemy as sa
 
-from backend.models import Base
+from backend.shared.models import Base
 
 
 revision = "20260428_01"

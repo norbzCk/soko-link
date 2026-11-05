@@ -2,10 +2,10 @@ import io
 
 import pytest
 from fastapi.testclient import TestClient
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base, BusinessUser
-from backend.app.auth import hash_password
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base, BusinessUser
+from backend.services.identity.auth import hash_password
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +58,7 @@ class TestBusinessRegister:
 
         # And must NOT have created a stray plain-customer User row as a
         # side effect (the old two-step flow's first step did exactly this).
-        from backend.models import User
+        from backend.shared.models import User
         stray_customer = db.query(User).filter(User.phone == "+255712345678").first()
         assert stray_customer is None
 

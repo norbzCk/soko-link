@@ -1,11 +1,11 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.models import User, BusinessUser, LogisticsUser, RefreshToken, TokenBlocklist
-from backend.app.auth import hash_password, create_access_token, create_refresh_token
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.shared.models import User, BusinessUser, LogisticsUser, RefreshToken, TokenBlocklist
+from backend.services.identity.auth import hash_password, create_access_token, create_refresh_token
 from datetime import datetime, timedelta, timezone
 
 

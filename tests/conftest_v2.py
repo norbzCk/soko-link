@@ -2,9 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.main import app
-from backend.database import SessionLocal, engine, Base
-from backend.models import User, BusinessUser, LogisticsUser, Product, Provider, Sale, BusinessMetrics
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine, Base
+from backend.shared.models import User, BusinessUser, LogisticsUser, Product, Provider, Sale, BusinessMetrics
 
 
 @pytest.fixture(autouse=True)

@@ -1,23 +1,23 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.models import (
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.shared.models import (
     User, BusinessUser, LogisticsUser, Product, Provider, Sale,
     Order, OrderItem, DeliveryOrder, BusinessMetrics, LogisticsMetrics,
     InventoryReservation, OrderStatusHistory, ShipmentEvent, AuditLog,
     ConversationThread, ConversationMessage, ConversationParticipant, MessageReceipt,
 )
-from backend.app.auth import hash_password
-from backend.app.order_runtime import (
+from backend.services.identity.auth import hash_password
+from backend.services.orders.order_runtime import (
     reserve_inventory, update_reservation_status, log_order_status,
     record_audit, record_shipment_event, ensure_order_thread,
     create_conversation_message, list_thread_messages,
     update_message_receipt, serialize_conversation_message,
 )
-from backend.app.notification_service import resolve_subject
+from backend.services.notifications.notification_service import resolve_subject
 from datetime import datetime, date
 
 
@@ -331,7 +331,7 @@ class TestSerializeConversationMessage:
 
 class TestActorPayload:
     def test_actor_payload_with_user(self, db, buyer_user):
-        from backend.app.order_runtime import actor_payload
+        from backend.services.orders.order_runtime import actor_payload
         actor_type, actor_id, display_name, role = actor_payload(buyer_user)
         assert actor_type == "user"
         assert actor_id == buyer_user.id
@@ -339,7 +339,7 @@ class TestActorPayload:
         assert role == "user"
 
     def test_actor_payload_with_none(self, db):
-        from backend.app.order_runtime import actor_payload
+        from backend.services.orders.order_runtime import actor_payload
         actor_type, actor_id, display_name, role = actor_payload(None)
         assert actor_type == "system"
         assert actor_id is None

@@ -3,8 +3,8 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-from backend.database import resolve_database_url
-from backend.models import Base
+from backend.shared.database import resolve_database_url
+from backend.shared.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

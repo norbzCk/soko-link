@@ -1,11 +1,11 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, Order, OrderItem, PaymentTransaction, PaymentAttempt, DeliveryOrder
-from backend.app.auth import hash_password
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.shared.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, Order, OrderItem, PaymentTransaction, PaymentAttempt, DeliveryOrder
+from backend.services.identity.auth import hash_password
 from datetime import date, datetime
 
 
@@ -270,8 +270,8 @@ class TestSTKPushPayment:
     def test_stk_push_then_webhook_completes_payment(self, client, db, buyer_user, product, seller_user, monkeypatch):
         """End-to-end: push succeeds (mocked provider) -> stays 'processing' ->
         webhook confirms -> transaction and order both flip to completed/Confirmed."""
-        from backend.app.payment_providers import base as provider_base
-        from backend.app.payment_providers import mpesa_service
+        from backend.services.payments.providers import base as provider_base
+        from backend.services.payments.providers import mpesa_service
 
         def fake_push_payment(self, *, phone_number, amount, reference, description):
             return provider_base.PushResult(accepted=True, provider_reference=reference, raw_response={"ok": True})

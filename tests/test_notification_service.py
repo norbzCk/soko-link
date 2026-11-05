@@ -1,18 +1,18 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.models import User, BusinessUser, Notification
-from backend.app.auth import hash_password
-from backend.app.notification_service import (
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.shared.models import User, BusinessUser, Notification
+from backend.services.identity.auth import hash_password
+from backend.services.notifications.notification_service import (
     resolve_subject, create_notification, send_email_message,
     build_login_email, build_password_reset_email,
     list_notifications_for_subject, unread_count_for_subject,
     mark_notification_as_read, serialize_notification,
 )
-from backend.app.notification_service import smtp_enabled
+from backend.services.notifications.notification_service import smtp_enabled
 
 
 @pytest.fixture(autouse=True)

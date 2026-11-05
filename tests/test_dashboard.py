@@ -1,11 +1,11 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, Notification
-from backend.app.auth import hash_password
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.shared.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, Notification
+from backend.services.identity.auth import hash_password
 from datetime import date
 
 
@@ -396,8 +396,8 @@ class TestSuperadminEndpoints:
         assert response.status_code == 404
 
     def test_suspend_and_reactivate_logistics(self, client, db, admin_user):
-        from backend.models import LogisticsUser
-        from backend.app.auth import hash_password
+        from backend.shared.models import LogisticsUser
+        from backend.services.identity.auth import hash_password
 
         logi = LogisticsUser(
             name="Test Rider",

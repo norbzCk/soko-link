@@ -1,12 +1,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from backend.app.main import app
-from backend.database import SessionLocal, engine
-from backend.models import Base
-from backend.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, AssistantConversation, AssistantConversationMessage
-from backend.app.ai_assistant import AssistantHistoryItem
-from backend.app.auth import hash_password
+from backend.api.main import app
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base
+from backend.shared.models import User, BusinessUser, Product, Provider, Sale, BusinessMetrics, AssistantConversation, AssistantConversationMessage
+from backend.services.intelligence.ai_assistant import AssistantHistoryItem
+from backend.services.identity.auth import hash_password
 from datetime import date
 
 
@@ -100,7 +100,7 @@ class TestGeminiProvider:
         """With Gemini 'configured' but failing (bad key/unreachable), the
         request should still succeed via fallback -- never a 500/502 to the
         end user just because one provider is down."""
-        from backend.app import ai_assistant as m
+        from backend.services.intelligence import ai_assistant as m
 
         monkeypatch.setattr(m, "_gemini_client", object())  # truthy, so the Gemini path is attempted
 
@@ -119,7 +119,7 @@ class TestGeminiProvider:
         assert data["reply"]
 
     def test_gemini_success_path_is_used_and_stored(self, client, db, monkeypatch):
-        from backend.app import ai_assistant as m
+        from backend.services.intelligence import ai_assistant as m
 
         monkeypatch.setattr(m, "_gemini_client", object())
 
@@ -264,7 +264,7 @@ class TestAssistantConversationOwnership:
 
 
 def test_prompt_history_ignores_welcome_and_route_noise():
-    from backend.app import ai_assistant as m
+    from backend.services.intelligence import ai_assistant as m
 
     history = [
         AssistantHistoryItem(role="assistant", text="I’m your SokoLink assistant. I’m available throughout the app to help with products, orders, account tasks, and the next step whenever you need support."),
