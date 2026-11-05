@@ -2,9 +2,9 @@
   "name": "sales-project",
   "private": true,
   "workspaces": [
-    "frontend-react"
+    "frontend"
   ],
   "scripts": {
-    "build": "cd frontend-react && npm run build"
+    "build": "cd frontend && npm run build"
   }
 }

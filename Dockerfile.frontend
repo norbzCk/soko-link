@@ -2,10 +2,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY frontend-react/package*.json ./
+COPY frontend/package*.json ./
 RUN npm ci
 
-COPY frontend-react/ ./
+COPY frontend/ ./
 RUN npm run build
 
 EXPOSE 8080

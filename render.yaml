@@ -5,7 +5,7 @@ services:
   - type: web
     runtime: static
     name: sokolink-frontend
-    rootDir: frontend-react
+    rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     pullRequestPreviewsEnabled: false
@@ -37,7 +37,7 @@ services:
     name: sales-backend
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT
     autoDeployTrigger: commit
     healthCheckPath: /healthz
     pullRequestPreviewsEnabled: false

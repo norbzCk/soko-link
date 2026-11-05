@@ -3,7 +3,7 @@
 }
 
 :8080 {
-  root * /app/frontend-react/dist
+  root * /app/frontend/dist
   file_server
   handle /api/* {
     uri strip_prefix /api

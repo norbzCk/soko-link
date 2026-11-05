@@ -47,10 +47,16 @@ uploads/
 .aider*
 
 # ----------------------
+# Environment examples (tracked)
+# ----------------------
+!.env.example
+!frontend/.env.example
+
+# ----------------------
 # Frontend build (commit for GitHub Pages)
 # ----------------------
-!frontend-react/dist/
-!frontend-react/dist/***.db
+!frontend/dist/
+
 supabase_schema.sql
 
 
