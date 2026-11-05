@@ -1,22 +1,43 @@
-.PHONY: help build up down restart logs clean dev frontend backend supabase-push supabase-pull supabase-migrate supabase-schema
+.PHONY: help install build up down restart logs clean dev test check backend frontend supabase-push supabase-pull supabase-migrate supabase-schema
 
-VENV = /home/norbs-ck/sales_project/venv/bin
+VENV ?= .venv
+PYTHON = $(VENV)/bin/python
+UVICORN = $(VENV)/bin/uvicorn
 
 help:
 	@echo "Commands:"
-	@echo "  make build            - Build all Docker images"
-	@echo "  make up               - Start all services via Docker"
-	@echo "  make down             - Stop all services"
-	@echo "  make restart          - Restart all services"
-	@echo "  make logs             - View logs"
+	@echo "  make install          - Install backend and frontend dependencies"
+	@echo "  make dev              - Run backend + frontend locally"
+	@echo "  make backend          - Run the FastAPI gateway"
+	@echo "  make frontend         - Run the Vite frontend"
+	@echo "  make test             - Run the backend test suite"
+	@echo "  make check            - Compile-check Python sources"
+	@echo "  make build            - Build Docker images"
+	@echo "  make up / down        - Start / stop Docker services"
+	@echo "  make logs             - Follow Docker logs"
 	@echo "  make clean            - Remove containers and volumes"
-	@echo "  make dev              - Start backend + frontend locally (no Docker)"
-	@echo "  make backend          - Start only the FastAPI backend locally"
-	@echo "  make frontend         - Start only the Vite frontend locally"
 	@echo "  make supabase-schema  - Export SQL schema for Supabase"
 	@echo "  make supabase-push    - Sync local DB -> Supabase"
 	@echo "  make supabase-pull    - Sync Supabase -> local DB"
-	@echo "  make supabase-migrate - Run Alembic migrations against Supabase"
+	@echo "  make supabase-migrate - Run Alembic migrations"
+
+install:
+	$(PYTHON) -m pip install -r requirements-dev.txt
+	cd frontend && npm install
+
+dev: backend frontend
+
+backend:
+	$(UVICORN) backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+frontend:
+	cd frontend && npm run dev -- --host 0.0.0.0
+
+test:
+	DATABASE_URL=sqlite:///./test.db $(PYTHON) -m pytest -q
+
+check:
+	$(PYTHON) -m compileall -q backend tests alembic
 
 build:
 	docker compose build
@@ -36,22 +57,14 @@ logs:
 clean:
 	docker compose down -v
 
-dev: backend frontend
-
-backend:
-	$(VENV)/uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-
-frontend:
-	cd frontend-react && npm run dev -- --host 0.0.0.0
-
 supabase-push:
-	$(VENV)/python -m backend.supabase_sync push
+	$(PYTHON) -m backend.scripts.supabase_sync push
 
 supabase-pull:
-	$(VENV)/python -m backend.supabase_sync pull
+	$(PYTHON) -m backend.scripts.supabase_sync pull
 
 supabase-migrate:
-	$(VENV)/alembic upgrade head
+	$(VENV)/bin/alembic upgrade head
 
 supabase-schema:
-	$(VENV)/python -m backend.generate_sql_schema supabase_schema.sql
+	$(PYTHON) -m backend.scripts.generate_sql_schema supabase_schema.sql

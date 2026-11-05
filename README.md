@@ -1,211 +1,117 @@
-# Soko-Link
+# SokoLink
 
-A full-stack sales analytics dashboard that visualizes revenue, orders, units sold, and product performance using a FastAPI backend. The repository now contains both the original lightweight HTML/CSS/JavaScript frontend and a new React + TypeScript frontend architecture for incremental migration.
+SokoLink is a multi-role marketplace and fulfilment platform: customers browse
+and order products, sellers manage inventory and fulfilment, logistics partners
+deliver, and superadmins operate the marketplace.
 
-## Features
+The repository is a **microservice-ready modular monorepo**: one FastAPI gateway
+today, with separate service packages for each business capability.
 
-## Real-time sales statistics
+## Repository layout
 
-Total revenue
-
-Total orders
-
-Units sold
-
-Top-selling product
-
-## Interactive charts
-
-Revenue by product (Bar Chart)
-
-Revenue over time (Line Chart)
-
-## FastAPI REST API
-
-#SQLAlchemy ORM for database access
-
-# Clean and a responsive dashboard UI
-
-## Tech Stack
-# Backend
-
-Python
-
-FastAPI
-
-SQLAlchemy
-
-PostgreSQL
-
-Uvicorn
-
- # Frontend
-
-HTML5
-
-CSS3
-
-Vanilla JavaScript
-
-Chart.js
-
-React
-
-TypeScript
-
-Vite
-
-
-## Setup & Installation
-1: Clone the repository
-git clone "https://github.com/norbzCk/norbzCk.github.io.git"
-cd norbzCk.github.io
-
-2: Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
+```text
+backend/
+├── api/          # FastAPI gateway: app wiring, CORS, health, superadmin
+├── services/     # identity, sellers, catalog, orders, payments,
+│                 # delivery, notifications, intelligence, disputes
+├── shared/       # database, models, shared schemas, utilities
+└── scripts/      # operational scripts
+frontend/         # React + TypeScript + Vite application
+tests/            # backend regression and integration tests
+alembic/          # database migrations
+docs/             # architecture and operations documentation
 ```
 
-### 3. Install dependencies
+See [docs/architecture/overview.md](docs/architecture/overview.md) and
+[docs/architecture/service-boundaries.md](docs/architecture/service-boundaries.md)
+for the full architecture.
+
+## Tech stack
+
+- **Backend:** Python, FastAPI, SQLAlchemy, Pydantic, Alembic, PostgreSQL
+- **Frontend:** React, TypeScript, Vite, Tailwind, TanStack Query
+- **Payments:** M-Pesa, Airtel Money, Tigo Pesa, bank transfer, cash
+- **Auth:** JWT access/refresh tokens with optional Supabase bridge
+
+## Local setup
+
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+cd frontend && npm install && cd ..
+cp .env.example .env
 ```
 
-### 4. Configure environment variables
-The backend now reads env vars:
+### Run the backend
 
-- `DATABASE_URL` (required in production)
-- `APP_SECRET_KEY` (required in production)
-- `CORS_ORIGINS` (comma-separated list, recommended in production)
-
-Example local values:
 ```bash
-export DATABASE_URL='postgresql://postgres:postgres123@localhost:5432/sales_db'
-export APP_SECRET_KEY='change-this-to-a-long-random-secret'
-export CORS_ORIGINS='http://127.0.0.1:5500,http://localhost:5500'
+DATABASE_URL=sqlite:///./dev.db .venv/bin/uvicorn backend.api.main:app --reload --port 8000
 ```
 
-### 5. Run backend
-```bash
-uvicorn backend.app.main:app --reload
-```
+- API: `http://localhost:8000`
+- Swagger: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/healthz`
 
-Backend/API:
-- `http://127.0.0.1:8000`
-- Swagger docs: `http://127.0.0.1:8000/docs`
+First startup seeds demo marketplace data.
 
-### 6. Choose frontend architecture
+### Run the frontend
 
-Legacy frontend:
-
-### 6a. Configure legacy frontend API URL
-Edit `frontend/js/config.js`:
-
-```js
-window.__APP_CONFIG__ = {
-  API_BASE: "http://127.0.0.1:8000",
-};
-```
-
-### 7a. Run legacy frontend
 ```bash
 cd frontend
-python -m http.server 5500
-
-
-Then open:
-
-http://127.0.0.1:5500/index.html
-
-React + TypeScript frontend:
-
-### 6b. Run the new frontend
-
-```bash
-cd frontend-react
-npm install
 npm run dev
 ```
 
-Optional API override:
+Open `http://localhost:5173`. The local frontend defaults to the API at
+`http://localhost:8000`.
+
+## Tests
 
 ```bash
-VITE_API_BASE=http://127.0.0.1:8000 npm run dev
+make test
 ```
 
-Then open:
-
-`http://127.0.0.1:5173`
-
-The React app is an architecture-first migration:
-
-- It preserves the same product aim and backend API
-- It centralizes routes, auth state, and HTTP access
-- It creates dedicated feature boundaries for the remaining page migrations
-
-## Deploy on Render
-
-This repository is ready for a split Render deployment using the root `render.yaml`:
-
-- `sales-analysis-api`: FastAPI web service
-- `sales-db`: PostgreSQL database
-- `sales-frontend`: React + Vite static site
-
-### Render blueprint flow
-
-1. Push this repository to GitHub.
-2. In Render, create a new Blueprint and select the repo.
-3. Render will detect `render.yaml` and provision the three resources.
-4. Wait for `sales-db`, `sales-analysis-api`, and `sales-frontend` to finish provisioning.
-5. Open the `sales-analysis-api` service and set `CORS_ORIGINS` to your frontend URL, such as `https://sales-frontend.onrender.com`.
-6. If you previously created a manual Render web service for this repo, delete it or stop using it so future deploys come from the Blueprint-managed services instead.
-
-### Important environment settings
-
-The frontend static site is configured to call:
-
-- `https://sales-analysis-api.onrender.com`
-
-Before going live, set the backend `CORS_ORIGINS` value in Render to your frontend URL, for example:
+Or directly:
 
 ```bash
-https://sales-frontend.onrender.com
+DATABASE_URL=sqlite:///./test.db .venv/bin/python -m pytest -q
 ```
 
-If you later rename the Render services or use a custom domain, update:
+The suite covers auth, products, orders, payments, delivery, notifications,
+analytics, disputes and AI assistant behavior.
 
-- `VITE_API_BASE` on the `sales-frontend` service
-- `CORS_ORIGINS` on the `sales-analysis-api` service
-
-### What the Blueprint config does
-
-- Provisions a Render PostgreSQL database named `sales-db`
-- Injects that database's private `connectionString` into `DATABASE_URL`
-- Starts FastAPI with `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`
-- Builds the React frontend from `frontend-react` and publishes `dist`
-- Adds an API health check at `/healthz`
-
-### If your current Render service is failing
-
-If your logs show a command like:
+## Docker
 
 ```bash
-uvicorn backend.app.main:app --reload
+docker compose up --build
 ```
 
-or errors connecting to:
+- Frontend: `http://localhost:8080`
+- Backend: `http://localhost:8000`
+- PostgreSQL: `localhost:5432`
 
-```bash
-localhost:5432
-```
+## Environment variables
 
-then Render is using a manually created service instead of the Blueprint-managed setup. A fresh Blueprint deploy will fix that wiring.
+Copy `.env.example` and set at least:
 
-### Notes
+- `DATABASE_URL` — database connection string
+- `APP_SECRET_KEY` — long random secret used to sign JWTs
+- `CORS_ORIGINS` — comma-separated allowed frontend origins
+- `VITE_API_BASE` — frontend API base URL
 
-- The backend currently stores uploaded files on the service filesystem under `/uploads`. That works for simple deployments, but uploaded files may not be durable across redeploys or instance replacement. For production durability, move uploads to object storage.
-- The frontend uses a single-page app rewrite to `/index.html`, so deep links like `/products` and `/orders` resolve correctly on Render.
+Payment provider variables are documented in `.env.payments.example`.
 
+## Contributing
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/architecture/development.md](docs/architecture/development.md) before
+opening a pull request.
 
+Key rules:
+
+- Add feature endpoints to the owning service under `backend/services/`.
+- Keep `backend/api/main.py` limited to app wiring and gateway endpoints.
+- Keep public API paths stable during refactors.
+- Add regression tests for business-rule changes.
+- Never commit `.env`, credentials or generated databases.

@@ -50,9 +50,9 @@ Remaining risk:
 
 Relevant code:
 
-- `backend/app/sales.py`
-- `backend/app/payments.py`
-- `backend/app/business.py`
+- `backend/services/orders/sales.py`
+- `backend/services/payments/payments.py`
+- `backend/services/sellers/business.py`
 
 ### 2. The order model is now normalized, but the checkout surface still retains a legacy `Sale` facade
 

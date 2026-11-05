@@ -1,39 +1,37 @@
-Local development: frontend, backend, and database
+# Local Development
 
-Ports and services
+See [architecture/development.md](architecture/development.md) for the canonical
+setup and workflow.
 
-- Frontend (Vite dev): http://localhost:5173 (default when running `cd frontend-react && npm run dev`)
-- Frontend (Docker preview / compose): http://localhost:8080 (docker-compose maps 8080 → container)
-- Backend (Uvicorn): http://localhost:8000 (default when running `uvicorn backend.app.main:app --reload --port 8000`)
-- Postgres (docker-compose): port 5432 → host 5432
+## Ports
 
-Environment variables
+| Service | URL |
+| --- | --- |
+| Frontend (Vite) | `http://localhost:5173` |
+| Frontend (Docker) | `http://localhost:8080` |
+| Backend gateway | `http://localhost:8000` |
+| PostgreSQL (Docker) | `localhost:5432` |
 
-- Use the repo root `.env` for hosted defaults (points to Supabase DB). For local dev with docker-compose the backend service uses `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT` from the compose file.
-- Frontend `.env` (frontend-react/.env) sets `VITE_API_BASE` for local dev. When using docker-compose the frontend container is configured to use `http://backend:8000` so it reaches the backend service internally.
-
-Key harmonization points
-
-- Backend DB selection: `backend/database.py` will prefer `DATABASE_URL` if present, otherwise it constructs a URL from `DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`/`DB_PORT`. Running locally with docker-compose uses the DB_* variables so the backend connects to the `db` service.
-- When running frontend in a browser (either Vite dev or docker-preview), the browser-origin must be permitted in `CORS_ORIGINS`. The backend reads `CORS_ORIGINS` from environment and configures `CORSMiddleware` accordingly.
-
-Docker-compose tips
-
-- Start everything together (builds + services):
+## Common commands
 
 ```bash
-# from repo root
-docker-compose up --build
+make backend    # FastAPI gateway with reload
+make frontend   # Vite dev server
+make test       # backend regression suite
+make check      # Python compile check
+make up         # Docker Compose stack
 ```
 
-- Access frontend at `http://localhost:8080` (if using docker-compose) or `http://localhost:5173` (if using Vite dev). The frontend will use `env.apiBase` to call the backend.
+## CORS and cookies
 
-Debugging CORS / auth issues
+- `CORS_ORIGINS` must include the browser origin using the API.
+- Do not use `*` when credentials are enabled.
+- For cross-site cookies over HTTPS, use `SameSite=None; Secure`.
 
-- If you see CORS errors in the browser console, check the `Access-Control-Allow-Origin` response header for the API call (Network tab). It must match the page origin and the backend must set `Access-Control-Allow-Credentials: true` if cookies are used.
-- Avoid `CORS_ORIGINS` containing `*` when `allow_credentials=True` — browsers will block Set-Cookie in that case.
-- For cookie auth across origins, ensure `Set-Cookie` includes `SameSite=None; Secure` when using HTTPS.
+## Troubleshooting
 
-If you want, I can:
-- Run the stack locally here and show the network headers and any CORS errors, or
-- Update other hosted configs (Netlify/GitHub Actions) to ensure `VITE_API_BASE` and `CORS_ORIGINS` are consistent.
+- **Database errors:** force SQLite with
+  `DATABASE_URL=sqlite:///./dev.db` or start PostgreSQL with `make up`.
+- **Frontend cannot reach API:** check `VITE_API_BASE` and `CORS_ORIGINS`.
+- **Schema mismatch:** the startup bootstrap patches known legacy columns;
+  future schema changes should be Alembic migrations.

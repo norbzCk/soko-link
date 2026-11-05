@@ -6,7 +6,7 @@ The backend has been reviewed against the system architecture review and the fol
 ## ✅ Fixed Issues
 
 ### 1. **FastAPI Deprecated Event Handlers** 
-**File:** `backend/app/main.py`
+**File:** `backend/api/main.py`
 
 **Issue:** The code was using the deprecated `@app.on_event("startup")` decorator, which triggers a deprecation warning in FastAPI.
 
@@ -41,7 +41,7 @@ app = FastAPI(lifespan=lifespan)
 ## ✅ Verified Compliance
 
 ### 2. **Transaction Safety & Concurrency Control**
-**File:** `backend/app/sales.py` (create_order function)
+**File:** `backend/services/orders/sales.py` (create_order function)
 
 **Status:** ✅ COMPLIANT
 - ✅ Row-level locking implemented with `with_for_update()` on products
@@ -50,7 +50,7 @@ app = FastAPI(lifespan=lifespan)
 - ✅ Inventory reservation atomically locked during checkout
 
 ### 3. **Payment Callback Idempotency**
-**File:** `backend/app/payments.py`
+**File:** `backend/services/payments/payments.py`
 
 **Status:** ✅ COMPLIANT
 - ✅ Idempotency-Key support in payment initiation
@@ -59,7 +59,7 @@ app = FastAPI(lifespan=lifespan)
 - ✅ Duplicate transaction detection before processing
 
 ### 4. **Multi-Item Order Support**
-**File:** `backend/app/sales.py`
+**File:** `backend/services/orders/sales.py`
 
 **Status:** ✅ COMPLIANT
 - ✅ Multi-item checkout supported with grouping by seller/provider
@@ -67,7 +67,7 @@ app = FastAPI(lifespan=lifespan)
 - ✅ Order creation handles multiple items per transaction
 
 ### 5. **Order Status History & Normalization**
-**Files:** `backend/app/sales.py`, `backend/app/order_runtime.py`
+**Files:** `backend/services/orders/sales.py`, `backend/services/orders/order_runtime.py`
 
 **Status:** ✅ COMPLIANT
 - ✅ Order model properly separated from legacy Sale records
@@ -77,7 +77,7 @@ app = FastAPI(lifespan=lifespan)
 - ✅ Audit logs created for sensitive actions
 
 ### 6. **Persistent Chat & Messaging**
-**File:** `backend/app/business.py`, conversation thread functions
+**File:** `backend/services/sellers/business.py`, conversation thread functions
 
 **Status:** ✅ COMPLIANT
 - ✅ Conversation threads stored persistently
