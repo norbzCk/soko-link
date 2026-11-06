@@ -46,6 +46,8 @@
   --accent-strong: #059669;
   --danger: #ef4444;
   --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  --shadow-premium: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  --shadow-premium-hover: 0 12px 32px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
 
   /* Dark theme palette variables (used by @theme via var()) */
   --dark-bg: #0b0f1a;
@@ -81,6 +83,8 @@
   --accent-strong: #10b981;
   --danger: #f87171;
   --shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+  --shadow-premium: 0 4px 24px -2px rgba(0, 0, 0, 0.4), 0 2px 8px -1px rgba(0, 0, 0, 0.3);
+  --shadow-premium-hover: 0 12px 36px -4px rgba(0, 0, 0, 0.6), 0 4px 16px -2px rgba(0, 0, 0, 0.4);
 
   /* Dark theme palette variables (used by @theme via var()) */
   --dark-bg: #0b0f1a;
@@ -307,6 +311,15 @@
 
   h1, h2, h3, h4 {
     letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  .page-transition-wrapper {
+    min-height: calc(100vh - 7rem);
   }
 }
 
