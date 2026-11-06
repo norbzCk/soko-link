@@ -13,14 +13,16 @@ def get_database_url():
     db_name = os.getenv("DB_NAME", "sales_db")
 
     password = quote_plus(db_pass)
-    return f"postgresql://{db_user}:{password}@{db_host}:{db_port}/{db_name}"
+    return f"postgresql+psycopg2://{db_user}:{password}@{db_host}:{db_port}/{db_name}"
 
 
 def resolve_database_url() -> str:
     database_url = os.getenv("DATABASE_URL", "").strip()
     if database_url:
         if database_url.startswith("postgres://"):
-            database_url = "postgresql://" + database_url[len("postgres://"):]
+            database_url = "postgresql+psycopg2://" + database_url[len("postgres://"):]
+        elif database_url.startswith("postgresql://") and not database_url.startswith("postgresql+"):
+            database_url = "postgresql+psycopg2://" + database_url[len("postgresql://"):]
         database_url = _fix_password_encoding(database_url)
         return _ensure_ssl_mode(database_url)
 
@@ -31,7 +33,12 @@ def resolve_database_url() -> str:
             "Render PostgreSQL database or define DATABASE_URL manually."
         )
 
-    return _ensure_ssl_mode(get_database_url())
+    # If DB_HOST or DB_USER is explicitly configured, use PostgreSQL
+    if os.getenv("DB_HOST") or os.getenv("DB_USER"):
+        return _ensure_ssl_mode(get_database_url())
+
+    # Default to local SQLite database for out-of-the-box zero-setup development
+    return "sqlite:///./dev.db"
 
 
 def _ensure_ssl_mode(url: str) -> str:
@@ -100,7 +107,8 @@ def _fix_password_encoding(url: str) -> str:
 
 DATABASE_URL = resolve_database_url()
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

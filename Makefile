@@ -3,6 +3,7 @@
 VENV ?= .venv
 PYTHON = $(VENV)/bin/python
 UVICORN = $(VENV)/bin/uvicorn
+NPM ?= $(shell which npm 2>/dev/null || (which flatpak-spawn >/dev/null 2>&1 && echo "flatpak-spawn --host npm") || echo "npm")
 
 help:
 	@echo "Commands:"
@@ -23,18 +24,23 @@ help:
 
 install:
 	$(PYTHON) -m pip install -r requirements-dev.txt
-	cd frontend && npm install
+	cd frontend && $(NPM) install
 
-dev: backend frontend
+dev:
+	@echo "Starting Soko-Link backend on :8000 and frontend on :5173..."
+	@trap 'kill 0' INT TERM; \
+	PYTHONPATH=. $(UVICORN) backend.api.main:app --host 0.0.0.0 --port 8000 --reload & \
+	(cd frontend && $(NPM) run dev -- --host 0.0.0.0) & \
+	wait
 
 backend:
-	$(UVICORN) backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+	PYTHONPATH=. $(UVICORN) backend.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 frontend:
-	cd frontend && npm run dev -- --host 0.0.0.0
+	cd frontend && $(NPM) run dev -- --host 0.0.0.0
 
 test:
-	DATABASE_URL=sqlite:///./test.db $(PYTHON) -m pytest -q
+	PYTHONPATH=. DATABASE_URL=sqlite:///./test.db $(PYTHON) -m pytest -q
 
 check:
 	$(PYTHON) -m compileall -q backend tests alembic
