@@ -1,3 +1,4 @@
+import re
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -86,6 +87,12 @@ def registered_logistics(db):
     return logistics
 
 
+def extract_verification_token(log_text: str) -> str:
+    match = re.search(r"verify-email\?token=([^\s]+)", log_text)
+    assert match, f"verification link not found in logs: {log_text}"
+    return match.group(1)
+
+
 class TestRegister:
     def test_register_user_success(self, client, db):
         response = client.post("/auth/register", json={
@@ -97,10 +104,12 @@ class TestRegister:
         })
         assert response.status_code == 200
         data = response.json()
-        assert "access_token" in data
-        assert data["userType"] == "user"
+        assert data["verification_required"] is True
+        assert "access_token" not in data
         assert data["user"]["name"] == "New User"
         assert data["user"]["email"] == "newuser@example.com"
+        assert data["user"]["is_verified"] is False
+        assert data["user"]["account_status"] == "PENDING_VERIFICATION"
 
     def test_register_user_missing_name(self, client, db):
         response = client.post("/auth/register", json={
@@ -111,11 +120,8 @@ class TestRegister:
         })
         assert response.status_code == 400
 
-    def test_register_user_can_login_immediately_without_email_confirmation(self, client, db):
-        """Regression test: registration used to set is_verified=False and
-        login rejected unverified customers with 401 'Please confirm your
-        email before signing in'. Both the flag and the login gate were
-        removed -- a freshly registered account must be usable right away."""
+    def test_register_requires_email_verification_before_login(self, client, db, caplog):
+        """New accounts stay pending until the emailed verification token is used."""
         register = client.post("/auth/register", json={
             "name": "Instant User",
             "email": "instantuser@example.com",
@@ -123,7 +129,19 @@ class TestRegister:
             "password": "TestPass1!",
         })
         assert register.status_code == 200
-        assert register.json()["user"].get("is_verified", True) is not False
+        assert register.json()["user"]["is_verified"] is False
+
+        blocked = client.post("/auth/login", json={
+            "email": "instantuser@example.com",
+            "password": "TestPass1!",
+        })
+        assert blocked.status_code == 403
+        assert "verify" in blocked.json()["detail"].lower()
+
+        token = extract_verification_token(caplog.text)
+        verified = client.post("/auth/verify-email", json={"token": token})
+        assert verified.status_code == 200
+        assert verified.json()["status"] == "ACTIVE"
 
         login = client.post("/auth/login", json={
             "email": "instantuser@example.com",

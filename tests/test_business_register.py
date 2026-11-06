@@ -1,4 +1,5 @@
 import io
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,26 +39,55 @@ VALID_PAYLOAD = {
 
 
 class TestBusinessRegister:
-    def test_register_success_returns_working_seller_session(self, client, db):
-        """The core bug this file guards against: registering as a seller
-        must issue a token whose role claim actually says 'seller', not a
-        leftover customer token from an earlier broken two-step flow."""
+    def test_register_success_requires_verification_and_approval(self, client, db, caplog):
         response = client.post("/business/register", data=VALID_PAYLOAD)
         assert response.status_code == 200
         data = response.json()
-        assert data["access_token"]
+        assert "access_token" not in data
+        assert data["verification_required"] is True
+        assert data["approval_required"] is True
         assert data["userType"] == "business"
         assert data["user"]["role"] == "seller"
 
-        # The returned token must actually authorize seller-only actions --
-        # not just claim role="seller" in the response body while the JWT
-        # itself encodes something else.
-        headers = {"Authorization": f"Bearer {data['access_token']}"}
-        me = client.get("/business/me", headers=headers)
-        assert me.status_code == 200
+        blocked = client.post("/auth/login", json={
+            "email": "amina@example.com",
+            "password": "SecurePass1!",
+        })
+        assert blocked.status_code == 403
+        assert "verify" in blocked.json()["detail"].lower()
 
-        # And must NOT have created a stray plain-customer User row as a
-        # side effect (the old two-step flow's first step did exactly this).
+        token = re.search(r"verify-email\?token=([^\s]+)", caplog.text).group(1)
+        assert client.post("/auth/verify-email", json={"token": token}).status_code == 200
+
+        pending = client.post("/auth/login", json={
+            "email": "amina@example.com",
+            "password": "SecurePass1!",
+        })
+        assert pending.status_code == 403
+        assert "approval" in pending.json()["detail"].lower()
+
+        admin = client.post("/auth/login", json={
+            "email": "superadmin@gmail.com",
+            "password": "adminkey",
+        })
+        admin_headers = {"Authorization": f"Bearer {admin.json()['access_token']}"}
+        applications = client.get("/auth/admin/applications?status=PENDING", headers=admin_headers).json()
+        seller_application = next(item for item in applications if item["identity"]["email"] == "amina@example.com")
+        approved = client.post(
+            f"/auth/admin/applications/{seller_application['id']}/approve",
+            headers=admin_headers,
+        )
+        assert approved.status_code == 200
+
+        login = client.post("/auth/login", json={
+            "email": "amina@example.com",
+            "password": "SecurePass1!",
+        })
+        assert login.status_code == 200
+        seller_token = login.json()["access_token"]
+        headers = {"Authorization": f"Bearer {seller_token}"}
+        assert client.get("/business/me", headers=headers).status_code == 200
+
         from backend.shared.models import User
         stray_customer = db.query(User).filter(User.phone == "+255712345678").first()
         assert stray_customer is None
@@ -96,25 +126,19 @@ class TestBusinessRegister:
         response = client.post("/business/register", data={**VALID_PAYLOAD, "phone": "0712345682"})
         assert response.status_code == 400
 
-    def test_register_ignores_client_supplied_role(self, client, db):
-        """Security regression test: the old schema had role: str = "seller"
-        as a client-controllable field with no server-side restriction on a
-        public, unauthenticated endpoint -- anyone could have POSTed
-        role="super_admin" and gotten a working super_admin session."""
-        data = {**VALID_PAYLOAD, "phone": "0712345683", "email": "escalation@example.com", "role": "super_admin"}
-        response = client.post("/business/register", data=data)
-        assert response.status_code == 200
-        assert response.json()["user"]["role"] == "seller"
-
     def test_register_short_business_name_rejected(self, client, db):
         data = {**VALID_PAYLOAD, "phone": "0712345684", "email": "shortname@example.com", "business_name": "A"}
         response = client.post("/business/register", data=data)
         assert response.status_code == 400
 
-    def test_register_without_email_still_works(self, client, db):
-        """Unlike customer registration, email is optional for sellers."""
+    def test_register_without_email_rejected(self, client, db):
         data = {k: v for k, v in VALID_PAYLOAD.items() if k != "email"}
         data["phone"] = "0712345685"
         response = client.post("/business/register", data=data)
+        assert response.status_code == 400
+
+    def test_register_ignores_client_supplied_role(self, client, db):
+        data = {**VALID_PAYLOAD, "phone": "0712345683", "email": "escalation@example.com", "role": "super_admin"}
+        response = client.post("/business/register", data=data)
         assert response.status_code == 200
-        assert response.json()["user"]["email"] is None
+        assert response.json()["user"]["role"] == "seller"

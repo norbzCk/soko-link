@@ -133,7 +133,9 @@ class TestLogisticsRegister:
         })
         assert response.status_code == 200
         data = response.json()
-        assert "access_token" in data
+        assert "access_token" not in data
+        assert data["verification_required"] is True
+        assert data["approval_required"] is True
         assert data["userType"] == "logistics"
 
     def test_register_logistics_duplicate_phone(self, client, db, logistics_user):
