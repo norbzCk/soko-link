@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -17,21 +18,79 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from backend.shared.database import SessionLocal, get_db
-from backend.services.notifications.notification_service import build_login_email, build_password_reset_email, create_notification, resolve_subject
-from backend.shared.models import User, BusinessUser, LogisticsUser, RefreshToken, TokenBlocklist
+from backend.services.notifications.notification_service import build_login_email, build_password_reset_email, create_notification, resolve_subject, smtp_enabled
+from backend.shared.models import (
+    BusinessMetrics,
+    BusinessUser,
+    Identity,
+    IdentityRole,
+    LogisticsMetrics,
+    LogisticsUser,
+    RefreshToken,
+    RoleApplication,
+    TokenBlocklist,
+    User,
+    VerificationToken,
+)
+from backend.services.identity.identity_service import (
+    ACCOUNT_STATUSES,
+    APPLICATION_ROLES,
+    APPLICATION_STATUSES,
+    PUBLIC_ROLES,
+    ROLE_ADMINISTRATOR,
+    ROLE_ANALYST,
+    ROLE_APPROVED,
+    ROLE_CUSTOMER,
+    ROLE_LOGISTICS_PROVIDER,
+    ROLE_PENDING,
+    ROLE_REJECTED,
+    ROLE_SELLER,
+    ROLE_SUPER_ADMIN,
+    ROLE_SUSPENDED,
+    STATUS_ACTIVE,
+    STATUS_DISABLED,
+    STATUS_PENDING_VERIFICATION,
+    STATUS_SUSPENDED,
+    audit,
+    approved_role_names,
+    as_utc,
+    canonical_role,
+    consume_verification_token,
+    default_profile,
+    ensure_identity_for_profile,
+    ensure_role,
+    issue_verification_token,
+    legacy_role,
+    new_otp,
+    normalize_role as normalize_iam_role,
+    profile_for_role,
+    profile_role,
+    profile_user_type,
+    role_is_approved,
+    roles_for_identity,
+    serialize_identity,
+    serialize_role_application,
+    utcnow,
+)
 
 # Security Constants
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 PASSWORD_RESET_TTL_SECONDS = 60 * 30
+EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60 * 24
+PHONE_OTP_TTL_SECONDS = 60 * 10
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+APP_ENV = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
 
 SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "superadmin@gmail.com").strip().lower()
 SUPERADMIN_PASSWORD = os.getenv("SUPERADMIN_PASSWORD", "adminkey")
 
 security = HTTPBearer(auto_error=False)
 limiter = Limiter(key_func=get_remote_address)
+logger = logging.getLogger(__name__)
 
 from backend.shared.utils.uploads import save_uploaded_image
 
@@ -39,10 +98,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 def _normalize_role(value: str | None) -> str:
-    role = (value or "").strip().lower()
-    if role == "customer":
-        return "user"
-    return role
+    return normalize_iam_role(value)
 
 
 def validate_password_strength(password: str):
@@ -130,14 +186,23 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(user_id: int, user_type: str, db: Session) -> str:
+def create_refresh_token(
+    user_id: int,
+    user_type: str,
+    db: Session,
+    *,
+    identity_id: int | None = None,
+    active_role: str | None = None,
+) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     token = secrets.token_urlsafe(32)
     db_token = RefreshToken(
         user_id=user_id,
+        identity_id=identity_id,
+        active_role=active_role,
         user_type=user_type,
         token=token,
-        expires_at=expire
+        expires_at=expire,
     )
     db.add(db_token)
     db.commit()
@@ -186,10 +251,319 @@ def clear_auth_cookies(response: Response):
     response.delete_cookie("refresh_token")
 
 
+def _identity_url(path: str, token: str) -> str:
+    separator = "&" if "?" in path else "?"
+    return f"{FRONTEND_URL}{path}{separator}token={token}"
+
+
+def _profile_status(profile) -> str:
+    status = str(getattr(profile, "account_status", "") or "").strip().upper()
+    if status in ACCOUNT_STATUSES:
+        return status
+    return STATUS_ACTIVE if getattr(profile, "is_active", True) else STATUS_SUSPENDED
+
+
+def _assert_identity_login_allowed(identity: Identity):
+    status = str(identity.status or "").strip().upper()
+    if status == STATUS_PENDING_VERIFICATION:
+        if not identity.email_verified and not identity.phone_verified:
+            raise HTTPException(status_code=403, detail="Please verify your email before signing in.")
+        raise HTTPException(status_code=403, detail="Your account is awaiting verification.")
+    if status == STATUS_SUSPENDED:
+        raise HTTPException(status_code=403, detail="This account has been suspended. Contact support.")
+    if status == STATUS_DISABLED:
+        raise HTTPException(status_code=403, detail="This account has been disabled. Contact support.")
+    if status not in ACCOUNT_STATUSES:
+        raise HTTPException(status_code=403, detail="This account cannot sign in right now.")
+
+
+def _profile_and_type_for_role(db: Session, identity: Identity, role: str):
+    canonical = canonical_role(role)
+    if not role_is_approved(db, identity.id, canonical):
+        raise HTTPException(status_code=403, detail="This role is not approved for your account.")
+    profile = profile_for_role(db, identity.id, canonical)
+    if profile is None:
+        raise HTTPException(status_code=403, detail="No profile is linked to this role.")
+    if not getattr(profile, "is_active", True) or _profile_status(profile) in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        raise HTTPException(status_code=403, detail="This role profile has been suspended.")
+    return profile, profile_user_type(profile), canonical
+
+
+def _choose_active_role(db: Session, identity: Identity, requested_role: str | None = None) -> str:
+    approved = approved_role_names(db, identity.id)
+    if not approved:
+        raise HTTPException(status_code=403, detail="Your role is awaiting administrator approval.")
+
+    if requested_role:
+        requested = canonical_role(requested_role)
+        if requested not in approved:
+            raise HTTPException(status_code=403, detail="You do not have access to that role.")
+        return requested
+
+    for preferred in (ROLE_CUSTOMER, ROLE_SELLER, ROLE_LOGISTICS_PROVIDER, ROLE_ADMINISTRATOR, ROLE_ANALYST):
+        if preferred in approved:
+            return preferred
+    return approved[0]
+
+
+def _serialize_profile(profile, user_type: str, active_role: str, roles: list[str]) -> dict:
+    return {
+        "id": getattr(profile, "id", None),
+        "name": getattr(profile, "name", getattr(profile, "business_name", "User")),
+        "email": getattr(profile, "email", None),
+        "phone": getattr(profile, "phone", None),
+        "address": getattr(profile, "address", None),
+        "profile_photo": getattr(profile, "profile_photo", None),
+        "role": legacy_role(active_role),
+        "active_role": active_role,
+        "roles": roles,
+        "user_type": user_type,
+        "is_verified": bool(getattr(profile, "is_verified", False)),
+        "is_active": bool(getattr(profile, "is_active", True)),
+        "account_status": _profile_status(profile),
+    }
+
+
+def _issue_identity_session(
+    response: Response,
+    db: Session,
+    identity: Identity,
+    active_role: str | None = None,
+):
+    canonical = _choose_active_role(db, identity, active_role)
+    profile, user_type, canonical = _profile_and_type_for_role(db, identity, canonical)
+    roles = approved_role_names(db, identity.id)
+    identity.last_login_at = utcnow()
+    if identity.status == STATUS_PENDING_VERIFICATION and (identity.email_verified or identity.phone_verified):
+        identity.status = STATUS_ACTIVE
+    db.add(identity)
+    db.flush()
+
+    token = create_access_token(
+        {
+            "sub": profile.id,
+            "user_id": profile.id,
+            "identity_id": identity.id,
+            "role": legacy_role(canonical),
+            "active_role": canonical,
+            "roles": roles,
+            "email": getattr(profile, "email", None),
+            "phone": getattr(profile, "phone", None),
+            "user_type": user_type,
+        }
+    )
+    refresh_token = create_refresh_token(
+        profile.id,
+        user_type,
+        db,
+        identity_id=identity.id,
+        active_role=canonical,
+    )
+    set_auth_cookies(response, token, refresh_token)
+    user = _serialize_profile(profile, user_type, canonical, roles)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "userType": user_type,
+        "user_type": user_type,
+        "user": user,
+        "roles": roles,
+        "active_role": canonical,
+    }
+
+
+def _notify_identity(
+    db: Session,
+    identity: Identity,
+    background_tasks: BackgroundTasks | None,
+    *,
+    title: str,
+    message: str,
+    subject: str,
+    body: str,
+    notification_type: str = "security",
+    severity: str = "info",
+    action_href: str | None = None,
+):
+    profile = default_profile(db, identity.id)
+    if profile is None:
+        return
+    recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(profile)
+    return create_notification(
+        db,
+        recipient_type=recipient_type,
+        recipient_id=recipient_id,
+        recipient_email=recipient_email,
+        title=title,
+        message=message,
+        notification_type=notification_type,
+        severity=severity,
+        action_href=action_href,
+        send_email=bool(recipient_email),
+        email_subject=subject,
+        email_body=body,
+        background_tasks=background_tasks,
+    )
+
+
+def _send_email_verification(
+    db: Session,
+    identity: Identity,
+    background_tasks: BackgroundTasks | None,
+) -> str:
+    raw, _ = issue_verification_token(
+        db,
+        identity.id,
+        purpose="email_verification",
+        channel="email",
+        ttl_seconds=EMAIL_VERIFICATION_TTL_SECONDS,
+    )
+    url = _identity_url("/verify-email", raw)
+    body = (
+        f"Hello {identity.name},\n\n"
+        "Confirm your email address to activate your SokoLink account.\n\n"
+        f"Verify email: {url}\n\n"
+        "This link expires in 24 hours. If you did not create an account, ignore this message.\n\n"
+        "SokoLink Security"
+    )
+    _notify_identity(
+        db,
+        identity,
+        background_tasks,
+        title="Verify your email address",
+        message="Confirm your email address to activate your SokoLink account.",
+        subject="Verify your SokoLink email address",
+        body=body,
+        severity="info",
+        action_href="/verify-email",
+    )
+    if not smtp_enabled() and not IS_PRODUCTION:
+        logger.warning("SMTP is not configured; email verification link for %s: %s", identity.email, url)
+    return raw
+
+
+def _send_phone_otp(
+    db: Session,
+    identity: Identity,
+    background_tasks: BackgroundTasks | None,
+) -> str:
+    otp = new_otp()
+    issue_verification_token(
+        db,
+        identity.id,
+        purpose="phone_verification",
+        channel="phone",
+        ttl_seconds=PHONE_OTP_TTL_SECONDS,
+        raw_token=otp,
+    )
+    body = (
+        f"Your SokoLink verification code is {otp}. "
+        "It expires in 10 minutes. If you did not request it, ignore this message."
+    )
+    _notify_identity(
+        db,
+        identity,
+        background_tasks,
+        title="Phone verification code",
+        message=body,
+        subject="Your SokoLink verification code",
+        body=body,
+        severity="info",
+    )
+    if not smtp_enabled() and not IS_PRODUCTION:
+        logger.warning("SMS provider is not configured; phone OTP for %s is %s", identity.phone, otp)
+    return otp
+
+
+def _contact_conflict(db: Session, email: str | None, phone: str | None, *, exclude_identity_id: int | None = None):
+    if email:
+        lowered = email.strip().lower()
+        identity = db.query(Identity).filter(func.lower(Identity.email) == lowered).first()
+        if identity and identity.id != exclude_identity_id:
+            return "Email already registered"
+        for model in (User, BusinessUser, LogisticsUser):
+            row = db.query(model).filter(func.lower(model.email) == lowered).first()
+            if row and (exclude_identity_id is None or getattr(row, "identity_id", None) != exclude_identity_id):
+                return "Email already registered"
+    if phone:
+        identity = db.query(Identity).filter(Identity.phone == phone).first()
+        if identity and identity.id != exclude_identity_id:
+            return "Phone number already registered"
+        for model in (User, BusinessUser, LogisticsUser):
+            row = db.query(model).filter(model.phone == phone).first()
+            if row and (exclude_identity_id is None or getattr(row, "identity_id", None) != exclude_identity_id):
+                return "Phone number already registered"
+    return None
+
+
+def create_identity(
+    db: Session,
+    *,
+    name: str,
+    email: str,
+    phone: str | None,
+    password: str,
+    status: str = STATUS_PENDING_VERIFICATION,
+    email_verified: bool = False,
+    phone_verified: bool = False,
+    supabase_uid: str | None = None,
+) -> Identity:
+    conflict = _contact_conflict(db, email, phone)
+    if conflict:
+        raise HTTPException(status_code=400, detail=conflict)
+    identity = Identity(
+        name=name.strip(),
+        email=email.strip().lower(),
+        phone=phone,
+        password_hash=hash_password(password),
+        status=status,
+        email_verified=email_verified,
+        phone_verified=phone_verified,
+    )
+    db.add(identity)
+    db.flush()
+    if supabase_uid:
+        # Keep the legacy column populated for existing Supabase code paths.
+        pass
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="identity",
+        entity_id=identity.id,
+        action="registered",
+        details={"email": identity.email, "phone": identity.phone},
+    )
+    return identity
+
+
+def create_customer_profile(db: Session, identity: Identity, *, address: str | None = None, profile_photo: str | None = None) -> User:
+    profile = User(
+        identity_id=identity.id,
+        name=identity.name,
+        email=identity.email,
+        phone=identity.phone,
+        address=address,
+        profile_photo=profile_photo,
+        password_hash=identity.password_hash,
+        role="user",
+        account_status=identity.status,
+        is_active=True,
+        is_verified=identity.email_verified,
+        supabase_uid=None,
+    )
+    db.add(profile)
+    db.flush()
+    ensure_role(db, identity.id, ROLE_CUSTOMER, status=ROLE_APPROVED)
+    return profile
+
+
 def _get_user_by_id(db: Session, user_id: int) -> User:
     user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if _profile_status(user) in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        raise HTTPException(status_code=403, detail="This account is not active")
     return user
 
 
@@ -308,6 +682,34 @@ def get_current_user(
     return user
 
 
+def _attach_role_context(db: Session, profile, payload: dict):
+    identity_id = payload.get("identity_id")
+    if identity_id:
+        try:
+            identity_id = int(identity_id)
+        except (TypeError, ValueError):
+            identity_id = None
+        if identity_id:
+            identity = db.query(Identity).filter(Identity.id == identity_id).first()
+            if identity is None:
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+            status = str(identity.status or "").strip().upper()
+            if status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+                raise HTTPException(status_code=403, detail="This account is not active")
+            active = canonical_role(payload.get("active_role")) or profile_role(profile, payload.get("user_type"))
+            if not role_is_approved(db, identity.id, active):
+                raise HTTPException(status_code=403, detail="Role access has been revoked")
+            profile.role = legacy_role(active)
+            profile.active_role = active
+            profile.roles = approved_role_names(db, identity.id)
+            profile.identity_id = identity.id
+        return profile
+
+    role = canonical_role(payload.get("active_role")) or canonical_role(payload.get("role"))
+    profile.role = legacy_role(role) if role else _normalize_role(getattr(profile, "role", None))
+    return profile
+
+
 def _resolve_user_from_payload(
     db: Session,
     payload: dict,
@@ -328,8 +730,9 @@ def _resolve_user_from_payload(
                 business = None
         if not business or not business.is_active:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        business.role = _normalize_role(business.role)
-        return business
+        if _profile_status(business) in {STATUS_SUSPENDED, STATUS_DISABLED}:
+            raise HTTPException(status_code=403, detail="This account is not active")
+        return _attach_role_context(db, business, payload)
 
     if user_type == "logistics":
         user_id = payload.get("user_id") or payload.get("sub")
@@ -341,15 +744,15 @@ def _resolve_user_from_payload(
                 logistics = None
         if not logistics or not logistics.is_active:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        logistics.role = "logistics"
-        return logistics
+        if _profile_status(logistics) in {STATUS_SUSPENDED, STATUS_DISABLED}:
+            raise HTTPException(status_code=403, detail="This account is not active")
+        return _attach_role_context(db, logistics, payload)
 
     user_id = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid token payload")
     user = _get_user_by_id(db, int(user_id))
-    user.role = _normalize_role(user.role)
-    return user
+    return _attach_role_context(db, user, payload)
 
 
 def get_optional_current_user(
@@ -370,8 +773,9 @@ def get_optional_current_user(
     try:
         payload = decode_token(token, db)
         return _resolve_user_from_payload(db, payload)
-    except HTTPException:
-        pass
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise
     except Exception:
         pass
 
@@ -427,13 +831,11 @@ def get_user_from_token(
 def require_roles(*allowed: str):
     allowed_set = {_normalize_role(role) for role in allowed}
 
-    def checker(user: User = Depends(get_current_user)) -> User:
+    def checker(user=Depends(get_current_user)):
         role = _normalize_role(user.role)
         user.role = role
-        if role == "owner" and ("super_admin" in allowed_set or "admin" in allowed_set):
-            return user
-        if role == "seller" and "admin" in allowed_set:
-            return user
+        # A superadmin is intentionally more privileged than an administrator.
+        # Seller/logistics/customer roles are never implicitly promoted.
         if role == "super_admin" and "admin" in allowed_set:
             return user
         if role not in allowed_set:
@@ -455,39 +857,63 @@ def request_password_recovery(
     if not identifier:
         raise HTTPException(status_code=400, detail="Please enter your email or phone number")
 
-    account_type, account = _find_recovery_account(db, identifier)
     response = {
         "message": "If an account matches the provided details, password recovery instructions are ready."
     }
 
-    if account and account.is_active:
-        reset_token = create_access_token(
-            data={
-                "purpose": "password_recovery",
-                "account_type": account_type,
-                "user_id": account.id,
-                "sub": account.id,
-            },
-            expires_delta=timedelta(seconds=PASSWORD_RESET_TTL_SECONDS)
-        )
-        
-        recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(account)
-        reset_subject, reset_body = build_password_reset_email(recipient_name, reset_token)
-        create_notification(
+    lookup = _normalize_identifier(identifier)
+    lowered = lookup.lower()
+    normalized_phone = _normalize_phone(lookup)
+
+    identity = None
+    if "@" in lookup:
+        identity = db.query(Identity).filter(func.lower(Identity.email) == lowered).first()
+    if identity is None and normalized_phone:
+        identity = db.query(Identity).filter(Identity.phone == normalized_phone).first()
+
+    # Legacy account fallback: attach it to an identity before issuing a token.
+    if identity is None:
+        account_type, account = _find_recovery_account(db, identifier)
+        if account is not None:
+            identity = ensure_identity_for_profile(db, account, account_type)
+            db.flush()
+
+    if identity is not None and identity.status not in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        raw, _ = issue_verification_token(
             db,
-            recipient_type=recipient_type,
-            recipient_id=recipient_id,
-            recipient_email=recipient_email,
+            identity.id,
+            purpose="password_reset",
+            channel="email",
+            ttl_seconds=PASSWORD_RESET_TTL_SECONDS,
+        )
+        reset_url = _identity_url("/forgot-password", raw)
+        if not smtp_enabled() and not IS_PRODUCTION:
+            logger.warning("SMTP is not configured; password reset link for %s: %s", identity.email, reset_url)
+        body = (
+            f"Hello {identity.name},\n\n"
+            "A password reset was requested for your SokoLink account.\n\n"
+            f"Reset password: {reset_url}\n\n"
+            "This link expires in 30 minutes. If you did not request this, ignore this message.\n\n"
+            "SokoLink Support"
+        )
+        _notify_identity(
+            db,
+            identity,
+            background_tasks,
             title="Password reset requested",
             message="Password reset instructions are ready for your account.",
-            notification_type="security",
+            subject="SokoLink password reset instructions",
+            body=body,
             severity="warning",
             action_href="/forgot-password",
-            metadata={"purpose": "password_recovery"},
-            send_email=bool(recipient_email),
-            email_subject=reset_subject,
-            email_body=reset_body,
-            background_tasks=background_tasks,
+        )
+        audit(
+            db,
+            actor_type="identity",
+            actor_id=identity.id,
+            entity_type="identity",
+            entity_id=identity.id,
+            action="password_reset_requested",
         )
         db.commit()
 
@@ -504,6 +930,36 @@ def reset_password_recovery(request: Request, payload: dict, db: Session = Depen
         raise HTTPException(status_code=400, detail="Reset token is required")
     validate_password_strength(new_password)
 
+    record = consume_verification_token(db, token, purpose="password_reset", channel="email")
+    if record:
+        identity = db.query(Identity).filter(Identity.id == record.identity_id).first()
+        if not identity or identity.status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+            raise HTTPException(status_code=400, detail="We could not reset the password for this account")
+        record.used_at = utcnow()
+        password_hash = hash_password(new_password)
+        identity.password_hash = password_hash
+        db.add(record)
+        db.add(identity)
+        for model in (User, BusinessUser, LogisticsUser):
+            for profile in db.query(model).filter(model.identity_id == identity.id).all():
+                profile.password_hash = password_hash
+                db.add(profile)
+        db.query(RefreshToken).filter(
+            RefreshToken.identity_id == identity.id,
+            RefreshToken.is_revoked == False,  # noqa: E712
+        ).update({RefreshToken.is_revoked: True, RefreshToken.revoked_at: utcnow()}, synchronize_session=False)
+        audit(
+            db,
+            actor_type="identity",
+            actor_id=identity.id,
+            entity_type="identity",
+            entity_id=identity.id,
+            action="password_reset_completed",
+        )
+        db.commit()
+        return {"message": "Password reset successful. You can now sign in with your new password."}
+
+    # Accept unexpired reset JWTs issued before the hashed-token migration.
     try:
         decoded = decode_token(token, db)
     except HTTPException:
@@ -514,7 +970,6 @@ def reset_password_recovery(request: Request, payload: dict, db: Session = Depen
 
     account_type = decoded.get("account_type")
     account_id = decoded.get("user_id") or decoded.get("sub")
-
     try:
         account_id = int(account_id)
     except (TypeError, ValueError):
@@ -532,7 +987,6 @@ def reset_password_recovery(request: Request, payload: dict, db: Session = Depen
 
     account.password_hash = hash_password(new_password)
     db.add(account)
-    # Revoke the reset token
     jti = decoded.get("jti")
     if jti:
         db.add(TokenBlocklist(jti=jti))
@@ -554,76 +1008,48 @@ def register(
 
     name = (payload.get("name") or "").strip()
     email = (payload.get("email") or "").strip().lower()
+    phone = (payload.get("phone") or "").strip()
     password = payload.get("password") or ""
+    address = (payload.get("address") or "").strip() or None
+    profile_photo = (payload.get("profile_photo") or "").strip() or None
 
     if len(name) < 2:
         raise HTTPException(status_code=400, detail="Name must be at least 2 characters")
     if "@" not in email:
         raise HTTPException(status_code=400, detail="Valid email is required")
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+    phone = validate_phone_format(phone)
     validate_password_strength(password)
 
-    existing = db.query(User).filter(User.email == email).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already exists")
-
-    phone = (payload.get("phone") or "").strip() or None
-    if phone:
-        phone = validate_phone_format(phone)
-        existing_phone = db.query(User).filter(User.phone == phone).first()
-        if existing_phone:
-            raise HTTPException(status_code=400, detail="Phone number already registered")
-
-    verification_token = secrets.token_urlsafe(32)
-    model = User(
+    identity = create_identity(
+        db,
         name=name,
         email=email,
         phone=phone,
-        address=(payload.get("address") or "").strip() or None,
-        profile_photo=(payload.get("profile_photo") or "").strip() or None,
-        password_hash=hash_password(password),
-        role="user",
-        is_active=True,
-        is_verified=True,  # Email confirmation is not required to use the platform
-        verification_token=verification_token,
-        supabase_uid=supabase_uid,
+        password=password,
+        status=STATUS_PENDING_VERIFICATION,
+        email_verified=False,
+        phone_verified=False,
     )
-    db.add(model)
-    db.commit()
-    db.refresh(model)
-
-    recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(model)
-    create_notification(
+    profile = create_customer_profile(
         db,
-        recipient_type=recipient_type,
-        recipient_id=recipient_id,
-        recipient_email=recipient_email,
-        title="Welcome to Soko-Link",
-        message="Your account is ready to go.",
-        notification_type="system",
-        severity="success",
-        action_href="/app/customer",
-        send_email=bool(recipient_email),
-        email_subject="Welcome to Soko-Link",
-        email_body=f"Hello {recipient_name},\n\nWelcome to Soko-Link. Your account is ready -- you can start browsing and ordering right away.\n\nSoko-Link Team",
-        background_tasks=background_tasks,
+        identity,
+        address=address,
+        profile_photo=profile_photo,
     )
+    if supabase_uid:
+        profile.supabase_uid = supabase_uid
+        db.add(profile)
+    db.flush()
+    _send_email_verification(db, identity, background_tasks)
     db.commit()
-
-    token = create_access_token({"sub": model.id, "role": "user", "email": model.email, "user_type": "user"})
-    refresh_token = create_refresh_token(model.id, "user", db)
-    set_auth_cookies(response, token, refresh_token)
 
     return {
-        "access_token": token,
-        "token_type": "bearer",
-        "userType": "user",
-        "user": {
-            "id": model.id,
-            "name": model.name,
-            "email": model.email,
-            "role": "user",
-            "is_verified": model.is_verified,
-        },
+        "message": "Account created. Check your email to verify your address before signing in.",
+        "verification_required": True,
+        "email_verification_required": True,
+        "user": _serialize_profile(profile, "user", ROLE_CUSTOMER, [ROLE_CUSTOMER]),
     }
 
 
@@ -641,55 +1067,42 @@ def register_customer(
 
     name = (payload.get("name") or "").strip()
     phone = (payload.get("phone") or "").strip()
-    email = (payload.get("email") or "").strip().lower() or None
+    email = (payload.get("email") or "").strip().lower()
     password = payload.get("password") or ""
     location = (payload.get("location") or "").strip() or None
-    
-    if not name or not phone or not password:
-        raise HTTPException(status_code=400, detail="Name, phone and password are required")
+    profile_photo = (payload.get("profile_photo") or "").strip() or None
+
+    if not name or not phone or not email or not password:
+        raise HTTPException(status_code=400, detail="Name, email, phone and password are required")
     validate_password_strength(password)
     phone = validate_phone_format(phone)
 
-    existing = db.query(User).filter(User.phone == phone).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
-    
-    normalized_email = email or f"{phone}@phone.local"
-    existing_email = db.query(User).filter(func.lower(User.email) == normalized_email.lower()).first()
-    if existing_email:
-        normalized_email = f"{phone}+{secrets.token_hex(3)}@phone.local"
-    
-    verification_token = secrets.token_urlsafe(32)
-    model = User(
+    identity = create_identity(
+        db,
         name=name,
-        email=normalized_email,
+        email=email,
         phone=phone,
-        address=location,
-        profile_photo=(payload.get("profile_photo") or "").strip() or None,
-        password_hash=hash_password(password),
-        role="user",
-        is_active=True,
-        is_verified=True,  # Email confirmation is not required to use the platform
-        verification_token=verification_token,
-        supabase_uid=supabase_uid,
+        password=password,
+        status=STATUS_PENDING_VERIFICATION,
     )
-    db.add(model)
+    profile = create_customer_profile(
+        db,
+        identity,
+        address=location,
+        profile_photo=profile_photo,
+    )
+    if supabase_uid:
+        profile.supabase_uid = supabase_uid
+        db.add(profile)
+    db.flush()
+    _send_email_verification(db, identity, background_tasks)
     db.commit()
-    db.refresh(model)
-    
-    token = create_access_token({"sub": model.id, "role": "user", "email": model.email})
-    refresh_token = create_refresh_token(model.id, "user", db)
-    set_auth_cookies(response, token, refresh_token)
-    
+
     return {
-        "access_token": token,
-        "user": {
-            "id": model.id,
-            "name": model.name,
-            "email": model.email,
-            "phone": model.phone,
-            "role": "user",
-        }
+        "message": "Account created. Check your email to verify your address before signing in.",
+        "verification_required": True,
+        "email_verification_required": True,
+        "user": _serialize_profile(profile, "user", ROLE_CUSTOMER, [ROLE_CUSTOMER]),
     }
 
 
@@ -705,9 +1118,18 @@ def login(
     email = _normalize_email(payload.get("email"))
     phone = _normalize_phone(payload.get("phone"))
     password = payload.get("password") or ""
-    
+
     if not password:
         raise HTTPException(status_code=400, detail="Password is required")
+    if not email and not phone:
+        raise HTTPException(status_code=400, detail="Email or phone is required")
+
+    requested_role = canonical_role(payload.get("active_role") or payload.get("role"))
+    if not requested_role:
+        requested_role = {
+            "business": ROLE_SELLER,
+            "logistics": ROLE_LOGISTICS_PROVIDER,
+        }.get(str(payload.get("user_type") or "").lower())
 
     if _superadmin_matches(email, password):
         temp_user = _build_superadmin_user()
@@ -733,31 +1155,79 @@ def login(
             email_body=body,
             background_tasks=background_tasks,
         )
-        db.commit()
-        
         token = create_access_token(
             data={
                 "sub": 0,
                 "role": "super_admin",
+                "active_role": ROLE_SUPER_ADMIN,
+                "roles": [ROLE_SUPER_ADMIN],
                 "email": SUPERADMIN_EMAIL,
                 "user_type": "superadmin",
             }
         )
-        refresh_token = create_refresh_token(0, "superadmin", db)
+        refresh_token = create_refresh_token(0, "superadmin", db, active_role=ROLE_SUPER_ADMIN)
         set_auth_cookies(response, token, refresh_token)
-        
+        db.commit()
         return {
             "access_token": token,
             "token_type": "bearer",
+            "userType": "superadmin",
+            "user_type": "superadmin",
             "user": {
                 "id": 0,
                 "name": "Super Admin",
                 "email": SUPERADMIN_EMAIL,
                 "role": "super_admin",
+                "active_role": ROLE_SUPER_ADMIN,
+                "roles": [ROLE_SUPER_ADMIN],
                 "is_active": True,
             },
+            "roles": [ROLE_SUPER_ADMIN],
+            "active_role": ROLE_SUPER_ADMIN,
         }
-    
+
+    identity = None
+    if email:
+        identity = db.query(Identity).filter(func.lower(Identity.email) == email).first()
+    if identity is None and phone:
+        identity = db.query(Identity).filter(Identity.phone == phone).first()
+
+    if identity is not None:
+        if not verify_password(password, identity.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        _assert_identity_login_allowed(identity)
+        result = _issue_identity_session(response, db, identity, requested_role)
+        role_label = legacy_role(result["active_role"])
+        _notify_identity(
+            db,
+            identity,
+            background_tasks,
+            title="Login detected",
+            message=f"A new login was recorded for your {role_label} account.",
+            subject=f"SokoLink login alert for your {role_label} account",
+            body=(
+                f"Hello {identity.name},\n\n"
+                f"Your {role_label} account just signed in to SokoLink.\n"
+                f"Time: {utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+                f"IP/Host: {request.client.host if request.client else 'Unavailable'}\n"
+                f"Device: {request.headers.get('user-agent') or 'Unknown device'}\n\n"
+                "If this was not you, reset your password immediately.\n\nSokoLink Security"
+            ),
+            action_href="/app/profile",
+        )
+        audit(
+            db,
+            actor_type="identity",
+            actor_id=identity.id,
+            entity_type="identity",
+            entity_id=identity.id,
+            action="login",
+            details={"role": result["active_role"]},
+        )
+        db.commit()
+        return result
+
+    # Backward compatibility for accounts created before unified identities.
     user = None
     user_type = "user"
     if email:
@@ -779,55 +1249,42 @@ def login(
 
     if not user or not verify_and_upgrade_password(password, user):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is disabled")
+    if _profile_status(user) in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        raise HTTPException(status_code=403, detail="Account is disabled")
 
-    role = getattr(user, "role", None)
-    if role is None:
-        role = "logistics" if isinstance(user, LogisticsUser) else "user"
-    role = _normalize_role(role)
-    user.role = role
-    
-    recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(user)
-    subject, body = build_login_email(
-        recipient_name,
-        role or "user",
-        request.client.host if request.client else None,
-        request.headers.get("user-agent"),
-    )
-    create_notification(
+    identity = ensure_identity_for_profile(db, user, user_type)
+    db.flush()
+    result = _issue_identity_session(response, db, identity, requested_role)
+    role_label = legacy_role(result["active_role"])
+    _notify_identity(
         db,
-        recipient_type=recipient_type,
-        recipient_id=recipient_id,
-        recipient_email=recipient_email,
+        identity,
+        background_tasks,
         title="Login detected",
-        message=f"A new login was recorded for your {role} account.",
-        notification_type="security",
-        severity="info",
+        message=f"A new login was recorded for your {role_label} account.",
+        subject=f"SokoLink login alert for your {role_label} account",
+        body=(
+            f"Hello {identity.name},\n\n"
+            f"Your {role_label} account just signed in to SokoLink.\n"
+            f"Time: {utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"IP/Host: {request.client.host if request.client else 'Unavailable'}\n"
+            f"Device: {request.headers.get('user-agent') or 'Unknown device'}\n\n"
+            "If this was not you, reset your password immediately.\n\nSokoLink Security"
+        ),
         action_href="/app/profile",
-        send_email=bool(recipient_email),
-        email_subject=subject,
-        email_body=body,
-        background_tasks=background_tasks,
+    )
+    audit(
+        db,
+        actor_type=user_type,
+        actor_id=user.id,
+        entity_type="identity",
+        entity_id=identity.id,
+        action="legacy_login_linked",
     )
     db.commit()
-
-    token = create_access_token(
-        data={"sub": user.id, "role": role, "email": getattr(user, "email", None), "user_type": user_type}
-    )
-    refresh_token = create_refresh_token(user.id, user_type, db)
-    set_auth_cookies(response, token, refresh_token)
-    
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "userType": user_type,
-        "user": {
-            "id": user.id,
-            "name": getattr(user, "name", getattr(user, "business_name", "User")),
-            "email": getattr(user, "email", None),
-            "phone": user.phone,
-            "role": role,
-        },
-    }
+    return result
 
 
 @router.post("/refresh")
@@ -835,17 +1292,16 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Refresh token missing")
-        
+
     db_token = db.query(RefreshToken).filter(
         RefreshToken.token == refresh_token,
-        RefreshToken.is_revoked == False,
-        RefreshToken.expires_at > datetime.now(timezone.utc)
+        RefreshToken.is_revoked == False,  # noqa: E712
+        RefreshToken.expires_at > datetime.now(timezone.utc),
     ).first()
-    
+
     if not db_token:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
-        
-    # Get user to build payload
+
     user = None
     if db_token.user_type == "business":
         user = db.query(BusinessUser).filter(BusinessUser.id == db_token.user_id).first()
@@ -855,17 +1311,68 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         user = _build_superadmin_user()
     else:
         user = db.query(User).filter(User.id == db_token.user_id).first()
-        
-    if not user or not user.is_active:
+
+    if not user or not getattr(user, "is_active", True):
+        db_token.is_revoked = True
+        db_token.revoked_at = utcnow()
+        db.commit()
         raise HTTPException(status_code=401, detail="User account disabled")
-        
-    role = _normalize_role(user.role)
+
+    identity = None
+    identity_id = db_token.identity_id or getattr(user, "identity_id", None)
+    if identity_id:
+        identity = db.query(Identity).filter(Identity.id == identity_id).first()
+        if identity is None or identity.status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+            db_token.is_revoked = True
+            db_token.revoked_at = utcnow()
+            db.commit()
+            raise HTTPException(status_code=401, detail="User account disabled")
+
+    canonical = canonical_role(db_token.active_role) or profile_role(user, db_token.user_type)
+    if identity is not None:
+        if not role_is_approved(db, identity.id, canonical):
+            db_token.is_revoked = True
+            db_token.revoked_at = utcnow()
+            db.commit()
+            raise HTTPException(status_code=403, detail="Role access has been revoked")
+        roles = approved_role_names(db, identity.id)
+    else:
+        roles = [canonical]
+
+    role = legacy_role(canonical)
     new_access_token = create_access_token(
-        data={"sub": user.id, "role": role, "email": getattr(user, "email", None), "user_type": db_token.user_type}
+        data={
+            "sub": user.id,
+            "user_id": user.id,
+            "identity_id": identity.id if identity else None,
+            "role": role,
+            "active_role": canonical,
+            "roles": roles,
+            "email": getattr(user, "email", None),
+            "phone": getattr(user, "phone", None),
+            "user_type": db_token.user_type,
+        }
     )
-    
-    set_auth_cookies(response, new_access_token)
-    return {"access_token": new_access_token}
+
+    # Rotate refresh tokens: the old token is single-use.
+    db_token.is_revoked = True
+    db_token.revoked_at = utcnow()
+    db.add(db_token)
+    new_refresh_token = create_refresh_token(
+        user.id,
+        db_token.user_type,
+        db,
+        identity_id=identity.id if identity else None,
+        active_role=canonical,
+    )
+    set_auth_cookies(response, new_access_token, new_refresh_token)
+    return {
+        "access_token": new_access_token,
+        "token_type": "bearer",
+        "roles": roles,
+        "active_role": canonical,
+        "user": _serialize_profile(user, db_token.user_type, canonical, roles),
+    }
 
 
 @router.post("/logout")
@@ -894,36 +1401,672 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 @router.post("/verify-email")
 def verify_email(payload: dict, db: Session = Depends(get_db)):
-    token = payload.get("token")
+    token = (payload.get("token") or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="Verification token is required")
-        
+
+    record = consume_verification_token(db, token, purpose="email_verification", channel="email")
+    if record:
+        identity = db.query(Identity).filter(Identity.id == record.identity_id).first()
+        if not identity:
+            raise HTTPException(status_code=400, detail="Invalid verification token")
+        identity.email_verified = True
+        if identity.status == STATUS_PENDING_VERIFICATION:
+            identity.status = STATUS_ACTIVE
+        record.used_at = utcnow()
+        db.add(record)
+        db.add(identity)
+        for model in (User, BusinessUser, LogisticsUser):
+            for profile in db.query(model).filter(model.identity_id == identity.id).all():
+                profile.is_verified = True
+                profile.verification_token = None
+                if profile.account_status == STATUS_PENDING_VERIFICATION:
+                    profile.account_status = identity.status
+                db.add(profile)
+        audit(
+            db,
+            actor_type="identity",
+            actor_id=identity.id,
+            entity_type="identity",
+            entity_id=identity.id,
+            action="email_verified",
+        )
+        db.commit()
+        return {"message": "Email verified successfully", "status": identity.status}
+
+    # Older accounts used a raw verification_token column.
     user = db.query(User).filter(User.verification_token == token).first()
     if not user:
         user = db.query(BusinessUser).filter(BusinessUser.verification_token == token).first()
     if not user:
         user = db.query(LogisticsUser).filter(LogisticsUser.verification_token == token).first()
-        
     if not user:
-        raise HTTPException(status_code=400, detail="Invalid verification token")
-        
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
     user.is_verified = True
     user.verification_token = None
+    db.add(user)
     db.commit()
     return {"message": "Email verified successfully"}
 
 
+@router.post("/verify-email/resend")
+@limiter.limit("3/minute")
+def resend_email_verification(
+    request: Request,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    email = _normalize_email(payload.get("email"))
+    response = {"message": "If the account exists and needs verification, a new email has been sent."}
+    if not email:
+        return response
+    identity = db.query(Identity).filter(func.lower(Identity.email) == email).first()
+    if not identity or identity.email_verified or identity.status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        return response
+    _send_email_verification(db, identity, background_tasks)
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="identity",
+        entity_id=identity.id,
+        action="verification_email_resent",
+    )
+    db.commit()
+    return response
+
+
+@router.post("/phone/send-otp")
+@limiter.limit("3/minute")
+def send_phone_otp(
+    request: Request,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    phone = _normalize_phone(payload.get("phone"))
+    response = {"message": "If the number belongs to an account, a verification code has been sent."}
+    if not phone:
+        return response
+    identity = db.query(Identity).filter(Identity.phone == phone).first()
+    if not identity or identity.phone_verified or identity.status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        return response
+    _send_phone_otp(db, identity, background_tasks)
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="identity",
+        entity_id=identity.id,
+        action="phone_otp_requested",
+    )
+    db.commit()
+    return response
+
+
+@router.post("/phone/verify-otp")
+@limiter.limit("5/minute")
+def verify_phone_otp(request: Request, payload: dict, db: Session = Depends(get_db)):
+    phone = _normalize_phone(payload.get("phone"))
+    otp = str(payload.get("otp") or payload.get("token") or "").strip()
+    if not phone or not otp:
+        raise HTTPException(status_code=400, detail="Phone and verification code are required")
+    identity = db.query(Identity).filter(Identity.phone == phone).first()
+    if not identity:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+    record = consume_verification_token(db, otp, purpose="phone_verification", channel="phone")
+    if not record or record.identity_id != identity.id:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+    record.used_at = utcnow()
+    identity.phone_verified = True
+    if identity.email_verified and identity.status == STATUS_PENDING_VERIFICATION:
+        identity.status = STATUS_ACTIVE
+    db.add(record)
+    db.add(identity)
+    profile = default_profile(db, identity.id)
+    if profile is not None:
+        profile.is_verified = True
+        db.add(profile)
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="identity",
+        entity_id=identity.id,
+        action="phone_verified",
+    )
+    db.commit()
+    return {"message": "Phone number verified successfully", "phone_verified": True}
+
+
 @router.get("/me")
-def me(current: User = Depends(get_current_user)):
+def me(current=Depends(get_current_user)):
+    active_role = getattr(current, "active_role", None) or profile_role(current)
     return {
         "id": current.id,
         "name": getattr(current, "name", getattr(current, "business_name", "User")),
         "email": getattr(current, "email", None),
         "phone": current.phone,
         "address": getattr(current, "address", None),
-        "role": current.role,
-        "is_verified": current.is_verified,
+        "profile_photo": getattr(current, "profile_photo", None),
+        "role": legacy_role(active_role),
+        "active_role": active_role,
+        "roles": getattr(current, "roles", [active_role]),
+        "user_type": profile_user_type(current),
+        "account_status": _profile_status(current),
+        "is_verified": bool(getattr(current, "is_verified", False)),
     }
+
+
+def _identity_for_current(db: Session, current) -> Identity:
+    if getattr(current, "id", None) == 0 and getattr(current, "role", None) == "super_admin":
+        raise HTTPException(status_code=400, detail="Superadmin has no switchable identity profile")
+    identity = None
+    if getattr(current, "identity_id", None):
+        identity = db.query(Identity).filter(Identity.id == current.identity_id).first()
+    if identity is None:
+        identity = ensure_identity_for_profile(db, current, profile_user_type(current))
+        db.flush()
+    return identity
+
+
+def _find_or_create_user_profile(db: Session, identity: Identity) -> User:
+    profile = db.query(User).filter(User.identity_id == identity.id).first()
+    if profile is None:
+        profile = db.query(User).filter(func.lower(User.email) == identity.email.lower()).first()
+        if profile is not None and profile.identity_id is None:
+            profile.identity_id = identity.id
+        else:
+            profile = User(
+                identity_id=identity.id,
+                name=identity.name,
+                email=identity.email,
+                phone=identity.phone,
+                password_hash=identity.password_hash,
+                role="user",
+                account_status=identity.status,
+                is_active=True,
+                is_verified=identity.email_verified,
+            )
+            db.add(profile)
+    db.flush()
+    return profile
+
+
+def _create_profile_from_application(db: Session, identity: Identity, application: RoleApplication):
+    payload = {}
+    if application.payload_json:
+        try:
+            payload = json.loads(application.payload_json) or {}
+        except json.JSONDecodeError:
+            payload = {}
+
+    if application.role == ROLE_SELLER:
+        profile = db.query(BusinessUser).filter(BusinessUser.identity_id == identity.id).first()
+        if profile is None:
+            profile = db.query(BusinessUser).filter(BusinessUser.phone == identity.phone).first()
+            if profile is not None and profile.identity_id is None:
+                profile.identity_id = identity.id
+            else:
+                profile = BusinessUser(
+                    identity_id=identity.id,
+                    business_name=(payload.get("business_name") or identity.name).strip(),
+                    owner_name=(payload.get("owner_name") or identity.name).strip(),
+                    phone=identity.phone,
+                    email=identity.email,
+                    password_hash=identity.password_hash,
+                    business_type=(payload.get("business_type") or "individual").strip() or "individual",
+                    category=(payload.get("category") or "").strip() or None,
+                    description=(payload.get("description") or "").strip() or None,
+                    region=(payload.get("region") or "Dar es Salaam").strip() or "Dar es Salaam",
+                    area=(payload.get("area") or "").strip() or None,
+                    street=(payload.get("street") or "").strip() or None,
+                    shop_number=(payload.get("shop_number") or "").strip() or None,
+                    operating_hours=(payload.get("operating_hours") or "").strip() or None,
+                    role="seller",
+                    account_status=STATUS_ACTIVE,
+                    is_active=True,
+                    is_verified=identity.email_verified,
+                    verification_status="verified",
+                )
+                db.add(profile)
+                db.flush()
+                db.add(BusinessMetrics(business_id=profile.id))
+        profile.verification_status = "verified"
+        profile.account_status = STATUS_ACTIVE
+        profile.is_active = True
+        db.add(profile)
+        return profile
+
+    if application.role == ROLE_LOGISTICS_PROVIDER:
+        profile = db.query(LogisticsUser).filter(LogisticsUser.identity_id == identity.id).first()
+        if profile is None:
+            profile = db.query(LogisticsUser).filter(LogisticsUser.phone == identity.phone).first()
+            if profile is not None and profile.identity_id is None:
+                profile.identity_id = identity.id
+            else:
+                profile = LogisticsUser(
+                    identity_id=identity.id,
+                    name=(payload.get("name") or identity.name).strip(),
+                    phone=identity.phone,
+                    email=identity.email,
+                    password_hash=identity.password_hash,
+                    account_type=(payload.get("account_type") or "individual").strip() or "individual",
+                    vehicle_type=(payload.get("vehicle_type") or "").strip() or None,
+                    plate_number=(payload.get("plate_number") or "").strip() or None,
+                    license_number=(payload.get("license_number") or "").strip() or None,
+                    base_area=(payload.get("base_area") or "").strip() or None,
+                    coverage_areas=(payload.get("coverage_areas") or "").strip() or None,
+                    role="logistics",
+                    account_status=STATUS_ACTIVE,
+                    is_active=True,
+                    is_verified=identity.email_verified,
+                    verification_status="verified",
+                )
+                db.add(profile)
+                db.flush()
+                db.add(LogisticsMetrics(logistics_id=profile.id))
+        profile.verification_status = "verified"
+        profile.account_status = STATUS_ACTIVE
+        profile.is_active = True
+        db.add(profile)
+        return profile
+
+    raise HTTPException(status_code=400, detail="Unsupported role application")
+
+
+@router.get("/roles")
+def list_my_roles(db: Session = Depends(get_db), current=Depends(get_current_user)):
+    identity = _identity_for_current(db, current)
+    rows = roles_for_identity(db, identity.id, approved_only=False)
+    result = []
+    for row in rows:
+        profile = profile_for_role(db, identity.id, row.role)
+        result.append(
+            {
+                "role": row.role,
+                "status": row.status,
+                "has_profile": profile is not None,
+            }
+        )
+    return {
+        "identity": serialize_identity(db, identity),
+        "active_role": getattr(current, "active_role", None) or profile_role(current),
+        "roles": result,
+    }
+
+
+@router.post("/switch-role")
+def switch_role(
+    payload: dict,
+    response: Response,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    identity = _identity_for_current(db, current)
+    requested = canonical_role(payload.get("role") or payload.get("active_role"))
+    if requested not in PUBLIC_ROLES | {ROLE_SUPER_ADMIN}:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if identity.status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        raise HTTPException(status_code=403, detail="This account is not active")
+    result = _issue_identity_session(response, db, identity, requested)
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="identity",
+        entity_id=identity.id,
+        action="role_switched",
+        details={"role": requested},
+    )
+    db.commit()
+    return result
+
+
+@router.get("/applications")
+def list_my_applications(db: Session = Depends(get_db), current=Depends(get_current_user)):
+    identity = _identity_for_current(db, current)
+    rows = (
+        db.query(RoleApplication)
+        .filter(RoleApplication.identity_id == identity.id)
+        .order_by(RoleApplication.created_at.desc(), RoleApplication.id.desc())
+        .all()
+    )
+    return [serialize_role_application(item) for item in rows]
+
+
+@router.post("/applications")
+def submit_role_application(
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    role = canonical_role(payload.get("role"))
+    if role not in APPLICATION_ROLES:
+        raise HTTPException(status_code=400, detail="Only seller and logistics applications are supported")
+    identity = _identity_for_current(db, current)
+    existing_role = (
+        db.query(IdentityRole)
+        .filter(IdentityRole.identity_id == identity.id, IdentityRole.role == role)
+        .first()
+    )
+    if existing_role and existing_role.status in {ROLE_APPROVED, ROLE_SUSPENDED}:
+        raise HTTPException(status_code=400, detail="This role is already assigned to your account")
+    pending = (
+        db.query(RoleApplication)
+        .filter(
+            RoleApplication.identity_id == identity.id,
+            RoleApplication.role == role,
+            RoleApplication.status == ROLE_PENDING,
+        )
+        .first()
+    )
+    if pending:
+        raise HTTPException(status_code=409, detail="You already have a pending application for this role")
+
+    details = {key: value for key, value in payload.items() if key not in {"role"}}
+    application = RoleApplication(
+        identity_id=identity.id,
+        role=role,
+        status=ROLE_PENDING,
+        payload_json=json.dumps(details) if details else None,
+    )
+    db.add(application)
+    ensure_role(db, identity.id, role, status=ROLE_PENDING)
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="role_application",
+        entity_id=None,
+        action="submitted",
+        details={"role": role},
+    )
+    db.commit()
+    db.refresh(application)
+    _notify_identity(
+        db,
+        identity,
+        background_tasks,
+        title="Application received",
+        message=f"Your {legacy_role(role)} application is pending administrator review.",
+        subject="SokoLink role application received",
+        body=f"Hello {identity.name},\n\nYour {legacy_role(role)} application is pending review.\n\nSokoLink Team",
+        severity="info",
+    )
+    db.commit()
+    return serialize_role_application(application)
+
+
+def _admin_can_manage_privileged(current) -> bool:
+    return _normalize_role(getattr(current, "role", None)) == "super_admin"
+
+
+@router.get("/admin/applications")
+def admin_list_role_applications(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    _=Depends(require_roles("admin", "super_admin", "owner")),
+):
+    query = db.query(RoleApplication)
+    if status:
+        normalized = str(status).strip().upper()
+        if normalized not in APPLICATION_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid application status")
+        query = query.filter(RoleApplication.status == normalized)
+    rows = query.order_by(RoleApplication.created_at.desc(), RoleApplication.id.desc()).all()
+    result = []
+    for item in rows:
+        data = serialize_role_application(item)
+        identity = db.query(Identity).filter(Identity.id == item.identity_id).first()
+        data["identity"] = serialize_identity(db, identity) if identity else None
+        result.append(data)
+    return result
+
+
+@router.post("/admin/applications/{application_id}/approve")
+def admin_approve_role_application(
+    application_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current=Depends(require_roles("admin", "super_admin", "owner")),
+):
+    application = db.query(RoleApplication).filter(RoleApplication.id == application_id).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Role application not found")
+    if application.status != ROLE_PENDING:
+        raise HTTPException(status_code=400, detail="Only pending applications can be approved")
+    identity = db.query(Identity).filter(Identity.id == application.identity_id).first()
+    if not identity:
+        raise HTTPException(status_code=404, detail="Identity not found")
+    if not identity.email_verified:
+        raise HTTPException(status_code=400, detail="The applicant must verify their email first")
+
+    profile = _create_profile_from_application(db, identity, application)
+    application.status = ROLE_APPROVED
+    application.reviewer_id = getattr(current, "id", None)
+    application.reviewed_at = utcnow()
+    ensure_role(db, identity.id, application.role, status=ROLE_APPROVED, approved_by=getattr(current, "id", None))
+    db.add(application)
+    audit(
+        db,
+        actor_type="admin",
+        actor_id=getattr(current, "id", None),
+        entity_type="role_application",
+        entity_id=application.id,
+        action="approved",
+        details={"role": application.role, "identity_id": identity.id},
+    )
+    db.commit()
+    _notify_identity(
+        db,
+        identity,
+        background_tasks,
+        title="Role application approved",
+        message=f"Your {legacy_role(application.role)} role is now active.",
+        subject="Your SokoLink role application was approved",
+        body=f"Hello {identity.name},\n\nYour {legacy_role(application.role)} role has been approved. Sign in and switch to that workspace to get started.\n\nSokoLink Team",
+        severity="success",
+        action_href="/login",
+    )
+    db.commit()
+    return {
+        "message": "Application approved",
+        "application": serialize_role_application(application),
+        "profile_type": profile_user_type(profile),
+    }
+
+
+@router.post("/admin/applications/{application_id}/reject")
+def admin_reject_role_application(
+    application_id: int,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current=Depends(require_roles("admin", "super_admin", "owner")),
+):
+    application = db.query(RoleApplication).filter(RoleApplication.id == application_id).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Role application not found")
+    if application.status != ROLE_PENDING:
+        raise HTTPException(status_code=400, detail="Only pending applications can be rejected")
+    reason = (payload.get("reason") or "").strip() or None
+    application.status = ROLE_REJECTED
+    application.rejection_reason = reason
+    application.reviewer_id = getattr(current, "id", None)
+    application.reviewed_at = utcnow()
+    ensure_role(db, application.identity_id, application.role, status=ROLE_REJECTED)
+    audit(
+        db,
+        actor_type="admin",
+        actor_id=getattr(current, "id", None),
+        entity_type="role_application",
+        entity_id=application.id,
+        action="rejected",
+        details={"role": application.role, "reason": reason},
+    )
+    identity = db.query(Identity).filter(Identity.id == application.identity_id).first()
+    db.commit()
+    if identity:
+        _notify_identity(
+            db,
+            identity,
+            background_tasks,
+            title="Role application update",
+            message=f"Your {legacy_role(application.role)} application was not approved.",
+            subject="SokoLink role application update",
+            body=f"Hello {identity.name},\n\nYour {legacy_role(application.role)} application was not approved."
+                 + (f"\nReason: {reason}" if reason else "")
+                 + "\n\nSokoLink Team",
+            severity="warning",
+        )
+        db.commit()
+    return {"message": "Application rejected", "application": serialize_role_application(application)}
+
+
+@router.get("/admin/identities")
+def admin_list_identities(
+    db: Session = Depends(get_db),
+    _=Depends(require_roles("admin", "super_admin", "owner")),
+):
+    rows = db.query(Identity).order_by(Identity.created_at.desc(), Identity.id.desc()).limit(500).all()
+    return [serialize_identity(db, item) for item in rows]
+
+
+@router.post("/admin/identities/{identity_id}/roles")
+def admin_assign_role(
+    identity_id: int,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current=Depends(require_roles("admin", "super_admin", "owner")),
+):
+    identity = db.query(Identity).filter(Identity.id == identity_id).first()
+    if not identity:
+        raise HTTPException(status_code=404, detail="Identity not found")
+    role = canonical_role(payload.get("role"))
+    status = str(payload.get("status") or ROLE_APPROVED).strip().upper()
+    if role not in PUBLIC_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if status not in {ROLE_APPROVED, ROLE_SUSPENDED, ROLE_REJECTED}:
+        raise HTTPException(status_code=400, detail="Invalid role status")
+    if role in {ROLE_ADMINISTRATOR, ROLE_ANALYST} and not _admin_can_manage_privileged(current):
+        raise HTTPException(status_code=403, detail="Only a superadmin can assign administrator or analyst roles")
+    if not identity.email_verified and status == ROLE_APPROVED:
+        raise HTTPException(status_code=400, detail="The identity must verify their email first")
+
+    if role == ROLE_SELLER or role == ROLE_LOGISTICS_PROVIDER:
+        application = RoleApplication(
+            identity_id=identity.id,
+            role=role,
+            status=ROLE_PENDING,
+            payload_json=json.dumps({"source": "admin_assignment"}),
+        )
+        db.add(application)
+        db.flush()
+        _create_profile_from_application(db, identity, application)
+        application.status = ROLE_APPROVED
+        application.reviewer_id = getattr(current, "id", None)
+        application.reviewed_at = utcnow()
+        db.add(application)
+    else:
+        profile = _find_or_create_user_profile(db, identity)
+        profile.role = legacy_role(role)
+        profile.account_status = identity.status
+        db.add(profile)
+
+    ensure_role(db, identity.id, role, status=status, approved_by=getattr(current, "id", None))
+    audit(
+        db,
+        actor_type="admin",
+        actor_id=getattr(current, "id", None),
+        entity_type="identity",
+        entity_id=identity.id,
+        action="role_assigned",
+        details={"role": role, "status": status},
+    )
+    db.commit()
+    _notify_identity(
+        db,
+        identity,
+        background_tasks,
+        title="Account role updated",
+        message=f"An administrator updated your {legacy_role(role)} access.",
+        subject="Your SokoLink account role was updated",
+        body=f"Hello {identity.name},\n\nYour {legacy_role(role)} access is now: {status.lower()}.\n\nSokoLink Team",
+        severity="info",
+    )
+    db.commit()
+    return {"message": "Role updated", "identity": serialize_identity(db, identity)}
+
+
+@router.patch("/admin/identities/{identity_id}/status")
+def admin_update_identity_status(
+    identity_id: int,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current=Depends(require_roles("admin", "super_admin", "owner")),
+):
+    identity = db.query(Identity).filter(Identity.id == identity_id).first()
+    if not identity:
+        raise HTTPException(status_code=404, detail="Identity not found")
+    status = str(payload.get("status") or "").strip().upper()
+    if status not in ACCOUNT_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid account status")
+    if getattr(current, "identity_id", None) == identity.id and status != STATUS_ACTIVE:
+        raise HTTPException(status_code=400, detail="You cannot suspend your own account")
+    if not _admin_can_manage_privileged(current):
+        privileged_roles = {ROLE_ADMINISTRATOR, ROLE_ANALYST, ROLE_SUPER_ADMIN}
+        has_privileged_role = (
+            db.query(IdentityRole)
+            .filter(
+                IdentityRole.identity_id == identity.id,
+                IdentityRole.role.in_(privileged_roles),
+            )
+            .first()
+            is not None
+        )
+        if has_privileged_role:
+            raise HTTPException(status_code=403, detail="Only a superadmin can change an administrator or analyst account status")
+
+    identity.status = status
+    db.add(identity)
+    for model in (User, BusinessUser, LogisticsUser):
+        for profile in db.query(model).filter(model.identity_id == identity.id).all():
+            profile.account_status = status
+            profile.is_active = status == STATUS_ACTIVE
+            db.add(profile)
+    if status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        db.query(RefreshToken).filter(
+            RefreshToken.identity_id == identity.id,
+            RefreshToken.is_revoked == False,  # noqa: E712
+        ).update({RefreshToken.is_revoked: True, RefreshToken.revoked_at: utcnow()}, synchronize_session=False)
+    audit(
+        db,
+        actor_type="admin",
+        actor_id=getattr(current, "id", None),
+        entity_type="identity",
+        entity_id=identity.id,
+        action="status_updated",
+        details={"status": status},
+    )
+    db.commit()
+    _notify_identity(
+        db,
+        identity,
+        background_tasks,
+        title="Account status changed",
+        message=f"Your account status is now {status.lower()}.",
+        subject="Your SokoLink account status changed",
+        body=f"Hello {identity.name},\n\nYour account status is now: {status.lower()}.\n\nSokoLink Team",
+        severity="success" if status == STATUS_ACTIVE else "warning",
+    )
+    db.commit()
+    return {"message": "Identity status updated", "identity": serialize_identity(db, identity)}
 
 
 @router.put("/me")
@@ -940,11 +2083,30 @@ def update_me(
         current.name = name
     elif hasattr(current, "business_name"):
         current.business_name = name
-        
-    current.phone = (payload.get("phone") or current.phone).strip()
+
+    phone_input = payload.get("phone")
+    if phone_input is not None and str(phone_input).strip():
+        new_phone = validate_phone_format(str(phone_input))
+    else:
+        new_phone = current.phone
+
+    identity_id = getattr(current, "identity_id", None)
+    if identity_id:
+        identity = db.query(Identity).filter(Identity.id == identity_id).first()
+        if identity:
+            if new_phone != current.phone:
+                conflict = _contact_conflict(db, None, new_phone, exclude_identity_id=identity.id)
+                if conflict:
+                    raise HTTPException(status_code=400, detail=conflict)
+            identity.phone = new_phone
+            if hasattr(current, "name"):
+                identity.name = name
+            db.add(identity)
+
+    current.phone = new_phone
     if hasattr(current, "address"):
         current.address = payload.get("address")
-        
+
     db.add(current)
     db.commit()
     db.refresh(current)
@@ -979,9 +2141,33 @@ def change_password(
         raise HTTPException(status_code=400, detail="Current password incorrect")
     validate_password_strength(new_password)
 
-    current.password_hash = hash_password(new_password)
+    password_hash = hash_password(new_password)
+    current.password_hash = password_hash
     db.add(current)
-    
+
+    identity_id = getattr(current, "identity_id", None)
+    if identity_id:
+        identity = db.query(Identity).filter(Identity.id == identity_id).first()
+        if identity:
+            identity.password_hash = password_hash
+            db.add(identity)
+        for model in (User, BusinessUser, LogisticsUser):
+            for profile in db.query(model).filter(model.identity_id == identity_id).all():
+                profile.password_hash = password_hash
+                db.add(profile)
+        db.query(RefreshToken).filter(
+            RefreshToken.identity_id == identity_id,
+            RefreshToken.is_revoked == False,  # noqa: E712
+        ).update({RefreshToken.is_revoked: True, RefreshToken.revoked_at: utcnow()}, synchronize_session=False)
+
+    audit(
+        db,
+        actor_type="identity" if identity_id else profile_user_type(current),
+        actor_id=getattr(current, "id", None),
+        entity_type="identity",
+        entity_id=identity_id or getattr(current, "id", None),
+        action="password_changed",
+    )
     recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(current)
     create_notification(
         db,
@@ -1021,14 +2207,21 @@ def create_user(
     if existing:
         raise HTTPException(status_code=400, detail="Email already exists")
 
-    model = User(
+    identity = create_identity(
+        db,
         name=name,
         email=email,
-        password_hash=hash_password(password),
-        role=role,
-        is_active=True,
-        is_verified=True,
+        phone=None,
+        password=password,
+        status=STATUS_ACTIVE,
+        email_verified=True,
     )
+    model = _find_or_create_user_profile(db, identity)
+    model.role = legacy_role(role)
+    model.account_status = STATUS_ACTIVE
+    model.is_active = True
+    model.is_verified = True
+    ensure_role(db, identity.id, role, status=ROLE_APPROVED, approved_by=getattr(current, "id", None))
     db.add(model)
     db.commit()
     db.refresh(model)
@@ -1038,6 +2231,7 @@ def create_user(
         "email": model.email,
         "role": model.role,
         "is_active": model.is_active,
+        "identity_id": identity.id,
     }
 
 
@@ -1064,11 +2258,13 @@ def list_users(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner")),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.role in {"super_admin", "owner"} and _normalize_role(getattr(current, "role", None)) != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a superadmin can delete a superadmin account")
     db.delete(user)
     db.commit()
     return {"message": "User deleted"}
@@ -1079,7 +2275,7 @@ def update_user(
     user_id: int,
     payload: dict,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner")),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -1088,12 +2284,26 @@ def update_user(
     role = str(payload.get("role") or user.role).strip().lower()
     if role not in {"user", "admin", "super_admin", "owner"}:
         raise HTTPException(status_code=400, detail="Invalid role")
+    privileged_target = user.role in {"super_admin", "owner"}
+    privileged_change = role in {"super_admin", "owner"}
+    if (privileged_target or privileged_change) and _normalize_role(getattr(current, "role", None)) != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a superadmin can manage superadmin accounts")
 
     is_active = payload.get("is_active")
     if is_active is not None:
         user.is_active = bool(is_active)
 
     user.role = role
+    identity_id = getattr(user, "identity_id", None)
+    if identity_id:
+        identity = db.query(Identity).filter(Identity.id == identity_id).first()
+        if identity:
+            ensure_role(db, identity.id, role, status=ROLE_APPROVED, approved_by=getattr(current, "id", None))
+            if is_active is not None and not is_active and identity.status == STATUS_ACTIVE:
+                identity.status = STATUS_SUSPENDED
+            elif is_active and identity.status == STATUS_SUSPENDED:
+                identity.status = STATUS_ACTIVE
+            db.add(identity)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -1104,6 +2314,7 @@ def update_user(
         "role": user.role,
         "is_active": user.is_active,
         "is_verified": user.is_verified,
+        "identity_id": identity_id,
     }
 
 

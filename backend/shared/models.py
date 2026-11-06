@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -94,10 +94,76 @@ class Customer(Base):
     location = Column(String, nullable=True)
 
 
+class Identity(Base):
+    """Canonical login identity shared by every role profile.
+
+    Profile rows (users, business_users, logistics_users) keep their existing
+    primary keys because orders and deliveries reference those IDs directly.
+    ``identity_id`` links the profiles that belong to the same human/company.
+    """
+
+    __tablename__ = "identities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False, index=True)
+    phone = Column(String, unique=True, nullable=True, index=True)
+    password_hash = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="PENDING_VERIFICATION")
+    email_verified = Column(Boolean, nullable=False, default=False)
+    phone_verified = Column(Boolean, nullable=False, default=False)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class IdentityRole(Base):
+    __tablename__ = "identity_roles"
+    __table_args__ = (UniqueConstraint("identity_id", "role", name="uq_identity_role"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    identity_id = Column(Integer, ForeignKey("identities.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False, default="PENDING", index=True)
+    approved_by = Column(Integer, nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RoleApplication(Base):
+    __tablename__ = "role_applications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    identity_id = Column(Integer, ForeignKey("identities.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False, default="PENDING", index=True)
+    payload_json = Column(Text, nullable=True)
+    reviewer_id = Column(Integer, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class VerificationToken(Base):
+    __tablename__ = "verification_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    identity_id = Column(Integer, ForeignKey("identities.id", ondelete="CASCADE"), nullable=False, index=True)
+    purpose = Column(String, nullable=False, index=True)
+    channel = Column(String, nullable=False, index=True)
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=True, index=True)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False, index=True)
     phone = Column(String, nullable=True)
@@ -105,6 +171,7 @@ class User(Base):
     profile_photo = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default="user")
+    account_status = Column(String, nullable=False, default="ACTIVE")
     is_active = Column(Boolean, nullable=False, default=True)
     is_verified = Column(Boolean, nullable=False, default=False)
     verification_token = Column(String, nullable=True)
@@ -132,6 +199,7 @@ class BusinessUser(Base):
     __tablename__ = "business_users"
 
     id = Column(Integer, primary_key=True, index=True)
+    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=True, index=True)
     business_name = Column(String, nullable=False)
     owner_name = Column(String, nullable=False)
     phone = Column(String, unique=True, nullable=False, index=True)
@@ -160,6 +228,7 @@ class BusinessUser(Base):
     verification_token = Column(String, nullable=True)
     supabase_uid = Column(String, nullable=True, index=True)
     role = Column(String, nullable=False, default="seller")  # seller, buyer
+    account_status = Column(String, nullable=False, default="ACTIVE")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -190,6 +259,7 @@ class LogisticsUser(Base):
     __tablename__ = "logistics_users"
 
     id = Column(Integer, primary_key=True, index=True)
+    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=True, index=True)
     name = Column(String, nullable=False)
     phone = Column(String, unique=True, nullable=False, index=True)
     email = Column(String, nullable=True)
@@ -209,6 +279,7 @@ class LogisticsUser(Base):
     verification_token = Column(String, nullable=True)
     supabase_uid = Column(String, nullable=True, index=True)
     role = Column(String, nullable=False, default="logistics")
+    account_status = Column(String, nullable=False, default="ACTIVE")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -420,11 +491,14 @@ class RefreshToken(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)
+    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=True, index=True)
+    active_role = Column(String, nullable=True)
     user_type = Column(String, nullable=False, index=True)  # user, business, logistics
     token = Column(String, unique=True, nullable=False, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_revoked = Column(Boolean, nullable=False, default=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class TokenBlocklist(Base):

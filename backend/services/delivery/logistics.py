@@ -1,3 +1,4 @@
+import json
 import secrets
 from datetime import datetime
 from typing import Optional
@@ -12,12 +13,39 @@ from backend.services.intelligence.marketplace_intelligence import (
     haversine_km,
     interpolate_coords,
 )
-from backend.shared.models import LogisticsUser, LogisticsMetrics, DeliveryOrder, BusinessUser, Order, Sale, User, PaymentTransaction
+from backend.shared.models import LogisticsUser, LogisticsMetrics, DeliveryOrder, BusinessUser, Identity, RoleApplication, Order, Sale, User, PaymentTransaction
 from backend.shared.schemas import (
     LogisticsRegister, LogisticsLogin, LogisticsProfile,
     DeliveryOrderCreate, DeliveryOrderResponse, DeliveryStatusUpdate
 )
-from backend.services.identity.auth import hash_password, verify_password, verify_and_upgrade_password, create_access_token as create_token, create_refresh_token, set_auth_cookies, decode_token, _normalize_phone, _phone_matches, get_current_user, security, validate_password_strength, validate_phone_format
+from backend.services.identity.auth import (
+    _assert_identity_login_allowed,
+    _issue_identity_session,
+    _normalize_phone,
+    _phone_matches,
+    _send_email_verification,
+    create_access_token as create_token,
+    create_identity,
+    create_refresh_token,
+    decode_token,
+    get_current_user,
+    hash_password,
+    security,
+    set_auth_cookies,
+    validate_password_strength,
+    validate_phone_format,
+    verify_and_upgrade_password,
+    verify_password,
+)
+from backend.services.identity.identity_service import (
+    ROLE_LOGISTICS_PROVIDER,
+    ROLE_PENDING,
+    STATUS_PENDING_VERIFICATION,
+    audit,
+    ensure_identity_for_profile,
+    ensure_role,
+    role_is_approved,
+)
 from backend.shared.utils.uploads import save_uploaded_image
 from backend.services.sellers.business import get_current_business_user
 from backend.services.notifications.notification_service import build_login_email, create_notification, resolve_subject
@@ -158,36 +186,46 @@ async def register_logistics(
     coverage_areas: str | None = Form(None),
     profile_photo: UploadFile | None = File(None),
 ):
+    """Create a logistics partner application pending email verification and
+    administrator approval. No session is issued here."""
     from backend.services.identity.supabase_auth import extract_supabase_uid_from_request
     supabase_uid = extract_supabase_uid_from_request(request, db)
 
     name = name.strip()
+    normalized_email = (email or "").strip().lower()
     if len(name) < 2:
         raise HTTPException(status_code=400, detail="Name must be at least 2 characters")
+    if "@" not in normalized_email:
+        raise HTTPException(status_code=400, detail="A valid email address is required")
 
     validate_password_strength(password)
     phone = validate_phone_format(phone)
 
-    normalized_email = (email or "").strip().lower() or None
-
     if _get_logistics_user(db, phone=phone):
         raise HTTPException(status_code=400, detail="Phone number already registered")
-    if normalized_email:
-        existing_email = db.query(LogisticsUser).filter(func.lower(LogisticsUser.email) == normalized_email).first()
-        if existing_email:
-            raise HTTPException(status_code=400, detail="Email already registered")
+    existing_email = db.query(LogisticsUser).filter(func.lower(LogisticsUser.email) == normalized_email).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    identity = create_identity(
+        db,
+        name=name,
+        email=normalized_email,
+        phone=phone,
+        password=password,
+        status=STATUS_PENDING_VERIFICATION,
+    )
 
     profile_photo_url = None
     if profile_photo is not None and profile_photo.filename:
         profile_photo_url = await save_uploaded_image(profile_photo)
 
-    pw_hash = hash_password(password)
-    
     user = LogisticsUser(
+        identity_id=identity.id,
         name=name,
         phone=phone,
         email=normalized_email,
-        password_hash=pw_hash,
+        password_hash=identity.password_hash,
         account_type=account_type,
         vehicle_type=(vehicle_type or "").strip() or None,
         plate_number=(plate_number or "").strip() or None,
@@ -196,47 +234,51 @@ async def register_logistics(
         coverage_areas=(coverage_areas or "").strip() or None,
         profile_photo=profile_photo_url,
         supabase_uid=supabase_uid,
+        role="logistics",
+        account_status=STATUS_PENDING_VERIFICATION,
+        is_active=True,
+        is_verified=False,
+        verification_status="pending",
     )
     db.add(user)
-    db.commit()
-    db.refresh(user)
-    
-    metrics = LogisticsMetrics(logistics_id=user.id)
-    db.add(metrics)
-    db.commit()
-    recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(user)
-    create_notification(
-        db,
-        recipient_type=recipient_type,
-        recipient_id=recipient_id,
-        recipient_email=recipient_email,
-        title="Welcome to SokoLnk delivery operations",
-        message="Your logistics account is ready. Go online, accept deliveries, and manage order fulfillment.",
-        notification_type="system",
-        severity="success",
-        action_href="/app/logistics",
-        send_email=bool(recipient_email),
-        email_subject="Welcome to SokoLnk delivery operations",
-        email_body=f"Hello {recipient_name},\n\nYour logistics account has been created successfully.\n\nSokoLnk Team",
-        background_tasks=background_tasks,
+    db.flush()
+
+    db.add(LogisticsMetrics(logistics_id=user.id))
+    application = RoleApplication(
+        identity_id=identity.id,
+        role=ROLE_LOGISTICS_PROVIDER,
+        status=ROLE_PENDING,
+        payload_json=json.dumps(
+            {
+                "name": name,
+                "account_type": account_type,
+                "vehicle_type": vehicle_type,
+                "plate_number": plate_number,
+                "license_number": license_number,
+                "base_area": base_area,
+                "coverage_areas": coverage_areas,
+            }
+        ),
     )
+    db.add(application)
+    ensure_role(db, identity.id, ROLE_LOGISTICS_PROVIDER, status=ROLE_PENDING)
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="role_application",
+        entity_id=None,
+        action="logistics_registration_submitted",
+    )
+    _send_email_verification(db, identity, background_tasks)
     db.commit()
-    
-    token = create_token({
-        "sub": user.id,
-        "user_id": user.id,
-        "phone": user.phone,
-        "user_type": "logistics"
-    })
-    refresh_token = create_refresh_token(user.id, "logistics", db)
-    set_auth_cookies(response, token, refresh_token)
-    
+
     return {
-        "message": "Logistics account created successfully",
-        "access_token": token,
-        "token_type": "bearer",
+        "message": "Logistics application submitted. Verify your email; an administrator will review your application before activation.",
+        "verification_required": True,
+        "approval_required": True,
         "userType": "logistics",
-        "user": _serialize_logistics(user)
+        "user": _serialize_logistics(user),
     }
 
 
@@ -245,23 +287,35 @@ def login_logistics(
     payload: LogisticsLogin,
     background_tasks: BackgroundTasks,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     phone = (payload.phone or "").strip() or None
     email = (payload.email or "").strip().lower() or None
-    
+
     if not phone and not email:
         raise HTTPException(status_code=400, detail="Phone or email is required")
-    
+
     user = _get_logistics_user(db, phone=phone, email=email)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
     if not verify_and_upgrade_password(payload.password, user):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
+
+    identity = ensure_identity_for_profile(db, user, "logistics")
+    db.flush()
+    _assert_identity_login_allowed(identity)
+    if not role_is_approved(db, identity.id, ROLE_LOGISTICS_PROVIDER):
+        raise HTTPException(status_code=403, detail="Your logistics role is awaiting administrator approval")
+
+    result = _issue_identity_session(response, db, identity, ROLE_LOGISTICS_PROVIDER)
+    result["message"] = "Login successful"
+    result["token"] = result["access_token"]
+    result["user"] = _serialize_logistics(user)
 
     recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(user)
     subject, body = build_login_email(
@@ -286,21 +340,7 @@ def login_logistics(
         background_tasks=background_tasks,
     )
     db.commit()
-    
-    token = create_token({
-        "sub": user.id,
-        "user_id": user.id,
-        "phone": user.phone,
-        "user_type": "logistics"
-    })
-    
-    return {
-        "message": "Login successful",
-        "token": token,
-        "access_token": token,
-        "token_type": "bearer",
-        "user": _serialize_logistics(user)
-    }
+    return result
 
 
 @router.get("/me")

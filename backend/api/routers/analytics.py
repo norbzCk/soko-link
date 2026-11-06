@@ -19,42 +19,42 @@ router = APIRouter(tags=["Analytics"])
 @router.get("/dashboard/stats")
 def get_dashboard_stats(
     db: Session = Depends(get_db),
-    current: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner", "analyst")),
 ):
     return dashboard_stats(db, current)
 
 @router.get("/dashboard/revenue-product")
 def get_revenue_product(
     db: Session = Depends(get_db),
-    current: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner", "analyst")),
 ):
     return revenue_by_product(db, current)
 
 @router.get("/dashboard/revenue-time")
 def get_revenue_time(
     db: Session = Depends(get_db),
-    current: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner", "analyst")),
 ):
     return revenue_over_time(db, current)
 
 @router.get("/dashboard/recent-sales")
 def recent_sales(
     db: Session = Depends(get_db),
-    current: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner", "analyst")),
 ):
     return get_recent_sales(db, current)
 
 @router.get("/dashboard/analytics")
 def get_dashboard_analytics(
     db: Session = Depends(get_db),
-    current: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner", "analyst")),
 ):
     return dashboard_analytics(db, current)
 
 @router.get("/dashboard/market-insights")
 def get_market_insights(
     db: Session = Depends(get_db),
-    current: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner", "analyst")),
 ):
     from backend.services.intelligence.analysis.sales_analysis import market_insights, pricing_insights, demand_forecast, peak_sales_periods, customer_buying_patterns
     return {
@@ -68,7 +68,7 @@ def get_market_insights(
 @router.get("/dashboard/export-sales")
 def export_sales_report(
     db: Session = Depends(get_db),
-    current: User = Depends(require_roles("admin", "super_admin", "owner")),
+    current: User = Depends(require_roles("admin", "super_admin", "owner", "analyst")),
 ):
     import csv
     import io

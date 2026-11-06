@@ -47,6 +47,17 @@ def ensure_schema_columns():
         add_column_if_not_exists("business_users", "supabase_uid", "supabase_uid VARCHAR")
         add_column_if_not_exists("logistics_users", "supabase_uid", "supabase_uid VARCHAR")
 
+        # Unified IAM links and account status columns.
+        add_column_if_not_exists("users", "identity_id", "identity_id INTEGER")
+        add_column_if_not_exists("users", "account_status", "account_status VARCHAR DEFAULT 'ACTIVE'")
+        add_column_if_not_exists("business_users", "identity_id", "identity_id INTEGER")
+        add_column_if_not_exists("business_users", "account_status", "account_status VARCHAR DEFAULT 'ACTIVE'")
+        add_column_if_not_exists("logistics_users", "identity_id", "identity_id INTEGER")
+        add_column_if_not_exists("logistics_users", "account_status", "account_status VARCHAR DEFAULT 'ACTIVE'")
+        add_column_if_not_exists("refresh_tokens", "identity_id", "identity_id INTEGER")
+        add_column_if_not_exists("refresh_tokens", "active_role", "active_role VARCHAR")
+        add_column_if_not_exists("refresh_tokens", "revoked_at", "revoked_at TIMESTAMPTZ")
+
         # Product catalog: allow storing picture URL per item.
         add_column_if_not_exists("products", "image_url", "image_url VARCHAR")
         add_column_if_not_exists("products", "rating_avg", "rating_avg DOUBLE PRECISION DEFAULT 0")
