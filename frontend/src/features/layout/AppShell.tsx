@@ -13,25 +13,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { getPostLoginPath, normalizeRole } from "../auth/authStorage";
-
-function resolveImageUrl(url?: string | null) {
-  const raw = String(url || "").trim();
-  if (!raw) return "";
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (raw.startsWith("data:")) return raw;
-  if (raw.startsWith("/")) return `${env.apiBase}${raw}`;
-  return `${env.apiBase}/${raw.replace(/^\/+/, "")}`;
-}
-
-function getInitials(name?: string) {
-  const text = String(name || "User").trim();
-  return text
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("");
-}
+import { resolveImageUrl, getInitials } from "../../lib/format";
 
 export function AppShell() {
   const { user, switchRole } = useAuth();

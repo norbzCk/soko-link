@@ -40,6 +40,7 @@ import {
 } from "recharts";
 import { apiRequest } from "../lib/http";
 import type { Order, SellerDashboardOverview } from "../types/domain";
+import { formatMoney, formatMoneyCompact as compactMoney, resolveGraphUrl } from "../lib/format";
 import { env } from "../config/env";
 
 interface RevenueRow {
@@ -77,17 +78,6 @@ interface MarketShareData {
   rank: number;
   total_sellers: number;
   percentile: number;
-}
-
-function formatMoney(value?: number) {
-  return `TZS ${Number(value || 0).toLocaleString()}`;
-}
-
-function compactMoney(value?: number) {
-  return `TZS ${Number(value || 0).toLocaleString(undefined, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  })}`;
 }
 
 const containerVariants = {
@@ -163,8 +153,8 @@ const stats = useMemo(() => {
       icon: DollarSign,
       color: "text-emerald-500",
       bg: "bg-emerald-500/10",
-      trend: "+12.5%",
-      isPositive: true
+      trend: overview.summary.revenue_today > 0 ? "Active today" : "No sales today",
+      isPositive: overview.summary.revenue_today > 0
     },
 
     {
@@ -173,7 +163,7 @@ const stats = useMemo(() => {
       icon: BarChart3,
       color: "text-purple-500",
       bg: "bg-purple-500/10",
-      trend: "+5.4%",
+      trend: overview.summary.orders_total > 0 ? "Per order" : "No orders yet",
       isPositive: true
     },
 
@@ -183,7 +173,7 @@ const stats = useMemo(() => {
       icon: Clock,
       color: "text-amber-500",
       bg: "bg-amber-500/10",
-      trend: "Stable",
+      trend: overview.summary.orders_pending > 0 ? "In progress" : "All cleared",
       isPositive: true
     },
 
@@ -193,7 +183,7 @@ const stats = useMemo(() => {
       icon: ShoppingBag,
       color: "text-brand",
       bg: "bg-brand/10",
-      trend: "+8.2%",
+      trend: "All time",
       isPositive: true
     },
 
@@ -203,7 +193,7 @@ const stats = useMemo(() => {
       icon: CheckCircle2,
       color: "text-emerald-600",
       bg: "bg-emerald-600/10",
-      trend: "+6.1%",
+      trend: "Fulfilled",
       isPositive: true
     },
 
@@ -213,8 +203,8 @@ const stats = useMemo(() => {
       icon: Truck,
       color: "text-orange-500",
       bg: "bg-orange-500/10",
-      trend: "Watch",
-      isPositive: false
+      trend: overview.summary.ongoing_deliveries > 0 ? "In transit" : "None pending",
+      isPositive: overview.summary.ongoing_deliveries === 0
     },
 
     {
@@ -238,11 +228,6 @@ const stats = useMemo(() => {
     }
   ];
 }, [overview]);
-
-  function resolveGraphUrl(path?: string | null) {
-    if (!path) return "";
-    return `${env.apiBase}${path}?t=${Date.now()}`;
-  }
 
   if (loading) {
     return (

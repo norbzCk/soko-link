@@ -306,19 +306,21 @@ export function CustomerDashboardPage() {
             </div>
             <div className="relative z-10 space-y-8">
               <div className="space-y-2">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Network Insights</span>
-                <h3 className="text-2xl font-display font-black tracking-tight">Trust Summary</h3>
-                <p className="text-white/60 text-sm font-medium leading-relaxed">Verified account standing and procurement metrics.</p>
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Account Standing</span>
+                <h3 className="text-2xl font-display font-black tracking-tight">Trust & Activity</h3>
+                <p className="text-white/60 text-sm font-medium leading-relaxed">Verified account credentials and procurement summary.</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-white/40">Success Rate</span>
-                  <strong className="mt-2 block text-2xl font-display font-black">98.2%</strong>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-white/40">Verification</span>
+                  <strong className="mt-2 block text-xl font-display font-black text-emerald-400">
+                    {user?.is_verified ? "Verified Buyer" : "Registered"}
+                  </strong>
                 </div>
                 <div className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-white/40">Pro Points</span>
-                  <strong className="mt-2 block text-2xl font-display font-black">2.4k</strong>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-white/40">Total Orders</span>
+                  <strong className="mt-2 block text-2xl font-display font-black">{summary.total}</strong>
                 </div>
               </div>
 

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../features/auth/AuthContext";
 import { BrandMark } from "./BrandMark";
 import { useEffect } from "react";
+import { getInitials } from "../lib/format";
 import { 
   LayoutDashboard, 
   Package, 
@@ -17,22 +18,13 @@ import {
   ChevronRight,
   ShieldCheck,
   BarChart3,
-  BadgeCheck
+  BadgeCheck,
+  Bell
 } from "lucide-react";
 
 interface SidebarProps {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
-}
-
-function getInitials(name?: string) {
-  const text = String(name || "User").trim();
-  return text
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("");
 }
 
 export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
@@ -64,6 +56,7 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     
     { to: "/app/products", label: "Marketplace", icon: Store, show: isSeller || isCustomer || isAdmin || isSuperadmin },
     { to: "/app/orders", label: "Orders", icon: ShoppingCart, show: isSeller || isCustomer || isAdmin || isSuperadmin },
+    { to: "/app/notifications", label: "Notifications", icon: Bell, show: true },
     { to: "/app/payments", label: "Payments", icon: CreditCard, show: isCustomer || isSuperadmin },
     { to: "/app/providers", label: "Suppliers", icon: Truck, show: isSeller || isAdmin || isSuperadmin },
     { to: "/app/seller/deliveries", label: "Shipments", icon: Truck, show: isSeller || isSuperadmin },
@@ -100,7 +93,7 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-[var(--sidebar-text)]">{displayName}</p>
-              <p className="text-[10px] font-black uppercase tracking-widest text-[var(--sidebar-text-muted)]">{role} Node</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-brand">{roleLabel}</p>
             </div>
           </div>
         </div>

@@ -105,7 +105,7 @@ export function LoginPage() {
 
         <form className="space-y-6" onSubmit={handleLogin}>
           <div className="space-y-2">
-            <label className="text-[11px] font-black uppercase tracking-widest text-text-muted ml-1">Identity</label>
+            <label className="text-[11px] font-black uppercase tracking-widest text-text-muted ml-1">Email or Phone</label>
             <div className="relative group">
               <div className="absolute left-5 top-1/2 -translate-y-1/2 text-text-muted group-focus-within:text-brand transition-colors">
                 <User size={18} />
@@ -113,7 +113,7 @@ export function LoginPage() {
               <input
                 name="identifier"
                 className="w-full h-14 pl-12 pr-5 bg-surface-soft border border-transparent focus:border-brand/30 focus:bg-surface rounded-2xl outline-none transition-all font-semibold text-text placeholder:text-text-muted"
-                placeholder="Email or Phone"
+                placeholder="e.g. name@example.com or +255..."
                 required
               />
             </div>
@@ -121,7 +121,10 @@ export function LoginPage() {
 
           <div className="space-y-2">
             <div className="flex items-center justify-between px-1">
-              <label className="text-[11px] font-black uppercase tracking-widest text-text-muted">Passphrase</label>
+              <label className="text-[11px] font-black uppercase tracking-widest text-text-muted">Password</label>
+              <Link to="/forgot-password" className="text-xs font-bold text-brand hover:underline">
+                Forgot password?
+              </Link>
             </div>
             <div className="relative group">
               <div className="absolute left-5 top-1/2 -translate-y-1/2 text-text-muted group-focus-within:text-brand transition-colors">
@@ -131,7 +134,7 @@ export function LoginPage() {
                 name="password"
                 type={showPassword ? "text" : "password"}
                 className="w-full h-14 pl-12 pr-14 bg-surface-soft border border-transparent focus:border-brand/30 focus:bg-surface rounded-2xl outline-none transition-all font-semibold text-text placeholder:text-text-muted"
-                placeholder="Secure Key"
+                placeholder="Enter your password"
                 required
               />
               <button

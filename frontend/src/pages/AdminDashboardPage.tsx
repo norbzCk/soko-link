@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../features/auth/AuthContext";
 import { env } from "../config/env";
 import { apiRequest } from "../lib/http";
+import { formatMoney, formatMoneyCompact as formatCompactMoney, resolveGraphUrl, formatDate } from "../lib/format";
 import { Pie } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -24,29 +25,8 @@ const emptyAnalytics: DashboardAnalytics = {
   recentSales: [],
 };
 
-function formatMoney(value?: number) {
-  return `TZS ${Number(value || 0).toLocaleString()}`;
-}
-
-function formatCompactMoney(value?: number) {
-  return `TZS ${Number(value || 0).toLocaleString(undefined, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  })}`;
-}
-
 function formatDateLabel(value?: string | null) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function resolveGraphUrl(path?: string | null) {
-  if (!path) return "";
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  if (path.startsWith("/")) return `${env.apiBase}${path}`;
-  return `${env.apiBase}/${path.replace(/^\/+/, "")}`;
+  return formatDate(value, { month: "short", day: "numeric" });
 }
 
 function buildVerticalBarChart(points: DashboardChartPoint[]) {

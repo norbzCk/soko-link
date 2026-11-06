@@ -22,6 +22,7 @@ import { getStoredToken } from "../features/auth/authStorage";
 import { PageIntro, StatCards, SectionCard } from "../components/ui/PageSections";
 import { env } from "../config/env";
 import { apiRequest } from "../lib/http";
+import { formatMoney, resolveImageUrl } from "../lib/format";
 import type { LogisticsDelivery } from "../types/domain";
 import { useDeliverySocket } from "../features/logistics/useDeliverySocket";
 import { LiveTrackingMap } from "../features/logistics/LiveTrackingMap";
@@ -49,19 +50,6 @@ interface LogisticsProfile {
     success_rate?: number;
     cancel_rate?: number;
   };
-}
-
-function formatMoney(value?: number | null) {
-  return `TZS ${Number(value || 0).toLocaleString()}`;
-}
-
-function resolveImageUrl(url?: string | null) {
-  const raw = String(url || "").trim();
-  if (!raw) return "";
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (raw.startsWith("data:")) return raw;
-  if (raw.startsWith("/")) return `${env.apiBase}${raw}`;
-  return `${env.apiBase}/${raw.replace(/^\/+/, "")}`;
 }
 
 function ActiveDeliveryManager({ delivery, currentUserId, onStatusUpdate }: { delivery: LogisticsDelivery, currentUserId: number | undefined, onStatusUpdate: () => void }) {
