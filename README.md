@@ -31,7 +31,7 @@ for the full architecture.
 - **Backend:** Python, FastAPI, SQLAlchemy, Pydantic, Alembic, PostgreSQL
 - **Frontend:** React, TypeScript, Vite, Tailwind, TanStack Query
 - **Payments:** M-Pesa, Airtel Money, Tigo Pesa, bank transfer, cash
-- **Auth:** JWT access/refresh tokens with optional Supabase bridge
+- **Auth:** Unified identity IAM with JWT access/refresh rotation, email verification, phone OTP verification, role applications, and optional Supabase bridge
 
 ## Local setup
 
@@ -81,6 +81,32 @@ DATABASE_URL=sqlite:///./test.db .venv/bin/python -m pytest -q
 The suite covers auth, products, orders, payments, delivery, notifications,
 analytics, disputes and AI assistant behavior.
 
+## Identity and access management
+
+SokoLink uses one canonical `Identity` per person with linked customer, seller,
+and logistics profiles. Public registration creates the identity and customer
+profile but does **not** issue a session until the email address is verified.
+Seller and logistics registration also requires administrator approval of the
+role application before that workspace can be used.
+
+- Supported roles: `CUSTOMER`, `SELLER`, `LOGISTICS_PROVIDER`,
+  `ADMINISTRATOR`, `ANALYST`.
+- Account statuses: `PENDING_VERIFICATION`, `ACTIVE`, `SUSPENDED`, `DISABLED`.
+- Role applications: `PENDING`, `APPROVED`, `REJECTED`, `SUSPENDED`.
+- Customers can apply for additional roles from **Roles & Access** in the app.
+- Administrators review applications in the **IAM Console**.
+- `GET /auth/me` and role switching are identity-aware; access tokens encode the
+  active role but authorization checks the current account and role status.
+- Email verification and password-reset tokens are stored hashed. Refresh tokens
+  rotate and are revoked on password changes and account suspension.
+
+Set `FRONTEND_URL` so verification and reset links point at the deployed frontend.
+Configure `SMTP_HOST`, `SMTP_FROM_EMAIL`, and related SMTP variables to deliver
+those links. If SMTP is not configured, development logs email verification,
+password-reset links, and phone OTPs; production never treats logging as delivery. There is no bundled
+SMS gateway yet — phone OTP notifications use the account email channel when
+SMTP is configured and otherwise require an external SMS integration.
+
 ## Docker
 
 ```bash
@@ -98,6 +124,11 @@ Copy `.env.example` and set at least:
 - `DATABASE_URL` — database connection string
 - `APP_SECRET_KEY` — long random secret used to sign JWTs
 - `CORS_ORIGINS` — comma-separated allowed frontend origins
+- `FRONTEND_URL` — public frontend URL used in verification/reset links
+- `APP_ENV` — `development` or `production`
+- `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` — bootstrap superadmin credentials
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_USE_TLS` — email delivery
 - `VITE_API_BASE` — frontend API base URL
 
 Payment provider variables are documented in `.env.payments.example`.
