@@ -37,6 +37,20 @@ export function BusinessRegisterPage() {
     const emailValue = String(form.get("email") || "").toLowerCase();
     form.set("email", emailValue);
 
+    const password = String(form.get("password") || "");
+    if (password !== String(form.get("confirm_password") || "")) {
+      setError("Passwords do not match.");
+      setIsSubmitting(false);
+      return;
+    }
+    if (!form.get("terms")) {
+      setError("Please accept the terms and privacy policy.");
+      setIsSubmitting(false);
+      return;
+    }
+    form.delete("confirm_password");
+    form.delete("terms");
+
     try {
       // Single call: /business/register creates the account, sets auth
       // cookies, and returns its own access token -- it doesn't need (and
@@ -105,7 +119,7 @@ export function BusinessRegisterPage() {
         <form className="grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={handleSubmit}>
           <InputField name="business_name" label="Business Name" required placeholder="E.g. Soko Retailers" />
           <InputField name="owner_name" label="Owner Name" required placeholder="Full Name" />
-          <InputField name="email" label="Email Address" type="email" placeholder="business@example.com" />
+          <InputField name="email" label="Email Address" type="email" required placeholder="business@example.com" />
           <InputField name="phone" label="Phone Number" required placeholder="0712345678" />
           
           <div className="space-y-1.5">
@@ -156,6 +170,13 @@ export function BusinessRegisterPage() {
           <div className="md:col-span-2">
             <InputField name="password" label="Password" type="password" required placeholder="At least 8 characters, with a number and symbol" />
           </div>
+          <div className="md:col-span-2">
+            <InputField name="confirm_password" label="Confirm Password" type="password" required placeholder="Repeat your password" />
+          </div>
+          <label className="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600">
+            <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" required />
+            <span>I agree to the seller terms, privacy policy, email verification, and administrator approval of my seller application.</span>
+          </label>
 
           <div className="md:col-span-2 pt-4">
             <button 

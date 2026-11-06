@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AuthScene } from "../components/AuthScene";
 import { apiRequest } from "../lib/http";
 
@@ -13,8 +13,9 @@ interface PasswordRecoveryResetResponse {
 }
 
 export function ForgotPasswordPage() {
+  const [searchParams] = useSearchParams();
   const [identifier, setIdentifier] = useState("");
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => searchParams.get("token") || "");
   const [newPassword, setNewPassword] = useState("");
   const [requestMessage, setRequestMessage] = useState("");
   const [resetMessage, setResetMessage] = useState("");
@@ -24,7 +25,10 @@ export function ForgotPasswordPage() {
   const [isResetting, setIsResetting] = useState(false);
   const [hasRequested, setHasRequested] = useState(false);
 
-  const canShowResetStep = useMemo(() => hasRequested || Boolean(token.trim()), [hasRequested, token]);
+  const canShowResetStep = useMemo(
+    () => hasRequested || Boolean(token.trim()) || Boolean(searchParams.get("token")),
+    [hasRequested, token, searchParams],
+  );
 
   async function handleRequestReset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -83,11 +87,11 @@ export function ForgotPasswordPage() {
     <AuthScene
       eyebrow="Recover account access"
       title="Reset your password and get back to work."
-      description="Use your phone number or email to request a reset for buyer, seller, or logistics accounts. In development, a reset token can be used immediately on this page."
+      description="Use your phone number or email to request a reset for customer, seller, or logistics accounts. We email a secure link that expires in 30 minutes."
       bullets={[
         "Request recovery using the same account identifier you sign in with",
-        "Supports buyer, seller, and delivery partner accounts",
-        "Continue the reset flow on the same page with a secure token",
+        "Supports customer, seller, and delivery partner accounts",
+        "Open the emailed link or paste the secure reset token",
         "Return to login once your new password has been saved",
       ]}
       links={[
@@ -134,6 +138,11 @@ export function ForgotPasswordPage() {
 
           {resetError ? <p className="alert error">{resetError}</p> : null}
           {resetMessage ? <p className="alert success">{resetMessage}</p> : null}
+          {!resetMessage ? (
+            <p className="auth-helper-text">
+              Already have the link from your email? Paste the token below, or open the link directly.
+            </p>
+          ) : null}
 
           <form className="form-grid auth-form-grid" onSubmit={handleResetPassword}>
             <label>

@@ -31,6 +31,9 @@ interface AuthContextValue {
   refreshUser: () => Promise<SessionUser | null>;
   verifyEmail: (token: string) => Promise<void>;
   resendConfirmationEmail: (email: string) => Promise<void>;
+  switchRole: (role: string) => Promise<SessionUser>;
+  sendPhoneOtp: (phone: string) => Promise<void>;
+  verifyPhoneOtp: (phone: string, otp: string) => Promise<void>;
   sendSmsOtp: (phone: string) => Promise<unknown>;
   verifySmsOtp: (phone: string, token: string) => Promise<SessionUser | null>;
 }
@@ -80,18 +83,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           method: "POST",
           auth: false,
         });
-        const userType = getStoredUserType();
-        const endpoint =
-          userType === "business"
-            ? "/business/me"
-            : userType === "logistics"
-              ? "/logistics/me"
-              : "/auth/me";
-        const fallbackType = userType || "user";
-        const fetched = await apiRequest<SessionUser>(endpoint);
-        const next = normalizeUser(fetched, fallbackType);
+        const fetched = await apiRequest<SessionUser>("/auth/me");
+        const fetchedType = ((fetched as any).user_type || getStoredUserType() || "user") as UserType;
+        const next = normalizeUser(fetched, fetchedType);
         if (next) {
-          persistSession(response.access_token, next, userType);
+          persistSession(response.access_token, next, fetchedType);
         }
         setUser(next);
         setToken(response.access_token);
@@ -122,18 +118,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           method: "POST",
           auth: false,
         });
-        const userType = getStoredUserType();
-        const endpoint =
-          userType === "business"
-            ? "/business/me"
-            : userType === "logistics"
-              ? "/logistics/me"
-              : "/auth/me";
-        const fallbackType = userType || "user";
-        const fetched = await apiRequest<SessionUser>(endpoint);
-        const next = normalizeUser(fetched, fallbackType);
+        const fetched = await apiRequest<SessionUser>("/auth/me");
+        const fetchedType = ((fetched as any).user_type || getStoredUserType() || "user") as UserType;
+        const next = normalizeUser(fetched, fetchedType);
         if (next) {
-          persistSession(response.access_token, next, userType);
+          persistSession(response.access_token, next, fetchedType);
         }
         setUser(next);
         setToken(response.access_token);
@@ -346,22 +335,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const appPayload: Record<string, unknown> = { name, email, password };
       if (phone) appPayload.phone = phone;
 
-      const data = await apiRequest<{ access_token?: string; user?: SessionUser; userType?: UserType }>(
-        "/auth/register",
-        { method: "POST", auth: false, body: appPayload }
-      );
-
-      const token = data.access_token;
-      const merged = normalizeUser({ ...(data.user || {}), role: data.user?.role }, data.userType);
-
-      if (!token || !merged) {
-        throw new Error("Invalid registration response");
-      }
-
-      const sessionType = merged.role === "super_admin" ? "superadmin" : (data.userType || "user");
-      persistSession(token, merged, sessionType);
-      setUser(merged);
-      setToken(token);
+      await apiRequest("/auth/register", {
+        method: "POST",
+        auth: false,
+        body: appPayload,
+      });
+      // Registration no longer creates a session: the account must verify its
+      // email (and, for seller/logistics, be approved) before signing in.
       return;
     }
 
@@ -456,7 +436,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function resendConfirmationEmail(email: string) {
     if (!supabase) {
-      throw new Error("Email confirmation is not available for this account type.");
+      await apiRequest("/auth/verify-email/resend", {
+        method: "POST",
+        auth: false,
+        body: { email: email.trim().toLowerCase() },
+      });
+      return;
     }
     const { error } = await supabase.auth.resend({
       type: "signup",
@@ -465,9 +450,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   }
 
+  async function switchRole(role: string) {
+    const data = await apiRequest<AuthResponse & { access_token?: string }>("/auth/switch-role", {
+      method: "POST",
+      body: { role },
+    });
+    const next = normalizeUser({ ...(data.user || {}), role: data.user?.role }, data.userType);
+    if (!data.access_token || !next) {
+      throw new Error("Invalid role switch response");
+    }
+    const sessionType = next.role === "super_admin" ? "superadmin" : (data.userType || "user");
+    persistSession(data.access_token, next, sessionType);
+    setUser(next);
+    setToken(data.access_token);
+    return next;
+  }
+
+  async function sendPhoneOtp(phone: string) {
+    await apiRequest("/auth/phone/send-otp", {
+      method: "POST",
+      auth: false,
+      body: { phone: phone.trim() },
+    });
+  }
+
+  async function verifyPhoneOtp(phone: string, otp: string) {
+    await apiRequest("/auth/phone/verify-otp", {
+      method: "POST",
+      auth: false,
+      body: { phone: phone.trim(), otp: otp.trim() },
+    });
+    await refreshUser();
+  }
+
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, login, register, logout, refreshUser, verifyEmail, resendConfirmationEmail, sendSmsOtp, verifySmsOtp }}
+      value={{ user, token, loading, login, register, logout, refreshUser, verifyEmail, resendConfirmationEmail, switchRole, sendPhoneOtp, verifyPhoneOtp, sendSmsOtp, verifySmsOtp }}
     >
       {children}
     </AuthContext.Provider>

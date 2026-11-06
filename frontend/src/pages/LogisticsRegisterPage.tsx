@@ -29,6 +29,20 @@ export function LogisticsRegisterPage() {
     }
     form.set("email", String(form.get("email") || "").trim().toLowerCase());
 
+    const password = String(form.get("password") || "");
+    if (password !== String(form.get("confirm_password") || "")) {
+      setError("Passwords do not match.");
+      setIsSubmitting(false);
+      return;
+    }
+    if (!form.get("terms")) {
+      setError("Please accept the terms and privacy policy.");
+      setIsSubmitting(false);
+      return;
+    }
+    form.delete("confirm_password");
+    form.delete("terms");
+
     try {
       // Single call: /logistics/register creates the account and sets auth
       // cookies itself -- no separate pre-registration step needed.
@@ -79,12 +93,16 @@ export function LogisticsRegisterPage() {
           <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="phone" required placeholder="0712345678" />
         </label>
         <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Email (optional)</span>
-          <input type="email" className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="email" />
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Email</span>
+          <input type="email" className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="email" required />
         </label>
         <label className="block space-y-2">
           <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Password</span>
           <input type="password" className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="password" required minLength={8} placeholder="At least 8 characters, with a number and symbol" />
+        </label>
+        <label className="block space-y-2">
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Confirm password</span>
+          <input type="password" className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="confirm_password" required minLength={8} />
         </label>
         <label className="block space-y-2">
           <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Account type</span>
@@ -137,6 +155,10 @@ export function LogisticsRegisterPage() {
               className="hidden"
             />
           </div>
+        </label>
+        <label className="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" required />
+          <span>I agree to the logistics partner terms, privacy policy, email verification, and administrator approval of my application.</span>
         </label>
         <button className="md:col-span-2 px-6 py-3 bg-brand text-white rounded-xl hover:bg-brand/90 transition-all font-medium text-sm shadow-lg" disabled={isSubmitting} type="submit">
           {isSubmitting ? "Submitting..." : "Register logistics"}

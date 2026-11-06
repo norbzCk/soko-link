@@ -1,12 +1,12 @@
 import { FormEvent, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { 
-  User, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  ArrowRight, 
+import {
+  User,
+  Lock,
+  Eye,
+  EyeOff,
+  ArrowRight,
   AlertCircle,
   CheckCircle2,
   Loader2
@@ -20,20 +20,16 @@ export function LoginPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const registeredAs = searchParams.get("registered");
+  const verifyFirst = searchParams.get("verify") === "1";
   const welcomeMessages: Record<string, string> = {
-    seller: "Your business account was created. Sign in to set up your storefront.",
-    customer: "Your account was created. Sign in to start shopping.",
-    logistics: "Your logistics account was created. Sign in to go online and start accepting deliveries.",
+    seller: "Your business account was created. Check your email to verify it, then wait for administrator approval before signing in.",
+    customer: "Your account was created. Check your email and click the verification link before signing in.",
+    logistics: "Your logistics account was created. Check your email to verify it, then wait for administrator approval before signing in.",
   };
   const { login } = useAuth();
-  const { sendSmsOtp, verifySmsOtp } = useAuth() as any;
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [smsMode, setSmsMode] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
-  const [phoneValue, setPhoneValue] = useState("");
-  const [otpValue, setOtpValue] = useState("");
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,17 +41,6 @@ export function LoginPage() {
     const password = String(form.get("password") || "");
 
     try {
-      if (smsMode) {
-        // In SMS mode, identifier contains phone and password field is OTP
-        const phone = identifier;
-        const token = password;
-        await verifySmsOtp(phone, token);
-        // successful; navigate to home
-        const from = (location.state as { from?: string } | null)?.from;
-        navigate(from || getPostLoginPath(null as any));
-        return;
-      }
-
       const user = await login(identifier, password);
       const from = (location.state as { from?: string } | null)?.from;
       navigate(from || getPostLoginPath(user));
@@ -92,15 +77,23 @@ export function LoginPage() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="p-4 bg-emerald-500/10 text-emerald-600 rounded-2xl font-bold flex items-center gap-3 border border-emerald-500/20 text-sm"
+            className={`p-4 rounded-2xl font-bold flex items-start gap-3 border text-sm ${
+              verifyFirst
+                ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
+                : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+            }`}
           >
-            <CheckCircle2 size={18} />
-            Welcome to SokoLnk! {welcomeMessages[registeredAs]}
+            <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+            <span>
+              {verifyFirst ? "One more step. " : "Welcome to SokoLnk! "}
+              {welcomeMessages[registeredAs]}{" "}
+              <Link to="/verify-email" className="underline underline-offset-2">Resend verification email</Link>.
+            </span>
           </motion.div>
         )}
 
         {error && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="p-4 bg-danger/10 text-danger rounded-2xl font-bold flex items-center gap-3 border border-danger/20 text-sm"
@@ -117,13 +110,11 @@ export function LoginPage() {
               <div className="absolute left-5 top-1/2 -translate-y-1/2 text-text-muted group-focus-within:text-brand transition-colors">
                 <User size={18} />
               </div>
-              <input 
-                name="identifier" 
-                value={smsMode ? phoneValue : undefined}
-                onChange={smsMode ? (e) => setPhoneValue(e.target.value) : undefined}
+              <input
+                name="identifier"
                 className="w-full h-14 pl-12 pr-5 bg-surface-soft border border-transparent focus:border-brand/30 focus:bg-surface rounded-2xl outline-none transition-all font-semibold text-text placeholder:text-text-muted"
-                placeholder={smsMode ? "Phone (e.g. +255700...)" : "Email or Phone"} 
-                required 
+                placeholder="Email or Phone"
+                required
               />
             </div>
           </div>
@@ -138,11 +129,9 @@ export function LoginPage() {
               </div>
               <input
                 name="password"
-                value={smsMode ? otpValue : undefined}
-                onChange={smsMode ? (e) => setOtpValue(e.target.value) : undefined}
-                type={smsMode ? "text" : (showPassword ? "text" : "password")}
+                type={showPassword ? "text" : "password"}
                 className="w-full h-14 pl-12 pr-14 bg-surface-soft border border-transparent focus:border-brand/30 focus:bg-surface rounded-2xl outline-none transition-all font-semibold text-text placeholder:text-text-muted"
-                placeholder={smsMode ? "One-time code" : "Secure Key"}
+                placeholder="Secure Key"
                 required
               />
               <button
@@ -155,9 +144,9 @@ export function LoginPage() {
             </div>
           </div>
 
-          <button 
-            className="w-full h-16 btn-primary shadow-brand/40 group active:scale-[0.98]" 
-            disabled={isSubmitting} 
+          <button
+            className="w-full h-16 btn-primary shadow-brand/40 group active:scale-[0.98]"
+            disabled={isSubmitting}
             type="submit"
           >
             {isSubmitting ? (
@@ -174,29 +163,10 @@ export function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-4 flex items-center justify-between">
-          <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" checked={smsMode} onChange={(e) => setSmsMode(e.target.checked)} />
-            <span className="font-medium">Sign in with SMS OTP</span>
-          </label>
-          <button
-            className="text-sm text-brand underline"
-            onClick={async () => {
-              if (!smsMode) return setSmsMode(true);
-              // send OTP
-              try {
-                setError("");
-                const phone = phoneValue.trim();
-                if (!phone) throw new Error("Enter phone number first");
-                await sendSmsOtp(phone);
-                setOtpSent(true);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              }
-            }}
-          >
-            {otpSent ? "Resend OTP" : "Send OTP"}
-          </button>
+        <div className="text-center">
+          <Link to="/verify-email" className="text-sm font-bold text-brand hover:underline">
+            Need to verify your email or phone?
+          </Link>
         </div>
 
         <div className="pt-8 border-t border-border flex flex-col items-center gap-6">

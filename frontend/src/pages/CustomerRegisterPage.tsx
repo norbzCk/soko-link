@@ -14,11 +14,23 @@ export function CustomerRegisterPage() {
     setIsSubmitting(true);
 
     const form = new FormData(event.currentTarget);
+    const password = String(form.get("password") || "");
+    const confirmPassword = String(form.get("confirm_password") || "");
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      setIsSubmitting(false);
+      return;
+    }
+    if (!form.get("terms")) {
+      setError("Please accept the terms and privacy policy.");
+      setIsSubmitting(false);
+      return;
+    }
     const payload = {
       name: String(form.get("name") || "").trim(),
       email: String(form.get("email") || "").trim().toLowerCase(),
       phone: String(form.get("phone") || "").trim(),
-      password: String(form.get("password") || ""),
+      password,
     };
 
     try {
@@ -31,7 +43,7 @@ export function CustomerRegisterPage() {
         body: payload,
         auth: false,
       });
-      navigate("/login?registered=customer", { replace: true });
+      navigate("/login?registered=customer&verify=1", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
       setIsSubmitting(false);
@@ -71,45 +83,61 @@ export function CustomerRegisterPage() {
         <form className="space-y-5" onSubmit={handleSubmit}>
           <div className="space-y-2">
             <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Full Name</label>
-            <input 
-              name="name" 
+            <input
+              name="name"
               className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
               placeholder="John Doe"
-              required 
+              required
             />
           </div>
           <div className="space-y-2">
             <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Email Address</label>
-            <input 
-              name="email" 
-              type="email" 
+            <input
+              name="email"
+              type="email"
               className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
               placeholder="john@example.com"
-              required 
+              required
             />
           </div>
           <div className="space-y-2">
             <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Phone Number</label>
-            <input 
-              name="phone" 
+            <input
+              name="phone"
               className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
               placeholder="07..."
-              required 
+              required
             />
           </div>
           <div className="space-y-2">
             <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Password</label>
-            <input 
-              name="password" 
-              type="password" 
+            <input
+              name="password"
+              type="password"
+              minLength={8}
               className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
-              placeholder="••••••••"
-              required 
+              placeholder="At least 8 characters, with a number and symbol"
+              required
             />
           </div>
-          <button 
-            className="w-full btn-primary !py-4 shadow-brand/30 mt-4" 
-            disabled={isSubmitting} 
+          <div className="space-y-2">
+            <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Confirm Password</label>
+            <input
+              name="confirm_password"
+              type="password"
+              minLength={8}
+              className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
+              placeholder="Repeat your password"
+              required
+            />
+          </div>
+          <label className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600">
+            <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" required />
+            <span>I agree to the marketplace terms, privacy policy, and email verification process.</span>
+          </label>
+          <button
+            className="w-full btn-primary !py-4 shadow-brand/30 mt-4"
+            disabled={isSubmitting}
             type="submit"
           >
             {isSubmitting ? "Processing..." : "Register Account"}

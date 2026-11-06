@@ -10,6 +10,8 @@ import { CustomerDashboardPage } from "../pages/CustomerDashboardPage";
 import { CustomerRegisterPage } from "../pages/CustomerRegisterPage";
 import { ForgotPasswordPage } from "../pages/ForgotPasswordPage";
 import { HomePage } from "../pages/HomePage";
+import { IamAdminPage } from "../pages/IamAdminPage";
+import { RolesPage } from "../pages/RolesPage";
 import { LogisticsDashboardPage } from "../pages/LogisticsDashboardPage";
 import { LogisticsRegisterPage } from "../pages/LogisticsRegisterPage";
 import { LoginPage } from "../pages/LoginPage";
@@ -39,6 +41,7 @@ function AppLanding() {
   const { user } = useAuth();
   const role = String(user?.role || "");
   if (role === "super_admin" || role === "owner") return <Navigate to="/app/superadmin" replace />;
+  if (role === "analyst") return <Navigate to="/app/analyst" replace />;
   if (role === "user") return <Navigate to="/app/customer" replace />;
   if (role === "logistics") return <Navigate to="/app/logistics" replace />;
   if (role === "seller") return <Navigate to="/app/seller" replace />;
@@ -71,6 +74,7 @@ export function App() {
         <Route index element={<AppLanding />} />
         <Route path="dashboard" element={<RoleRoute allowedRoles={["admin", "owner"]}><AdminDashboardPage /></RoleRoute>} />
         <Route path="superadmin" element={<RoleRoute allowedRoles={["super_admin", "owner"]}><SuperadminDashboardPage /></RoleRoute>} />
+        <Route path="analyst" element={<RoleRoute allowedRoles={["analyst"]}><AdminDashboardPage /></RoleRoute>} />
         <Route path="seller" element={<RoleRoute allowedRoles={["seller"]}><SellerDashboardPage /></RoleRoute>} />
         <Route path="seller/profile" element={<RoleRoute allowedRoles={["seller"]}><SellerProfilePage /></RoleRoute>} />
         <Route path="seller/deliveries" element={<RoleRoute allowedRoles={["seller"]}><SellerDeliveriesPage /></RoleRoute>} />
@@ -81,6 +85,7 @@ export function App() {
         <Route path="products" element={<ProductsPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="roles" element={<RolesPage />} />
         <Route path="customers" element={<RoleRoute allowedRoles={["super_admin", "owner"]}><CustomersPage /></RoleRoute>} />
         <Route path="product/:productId" element={<ProductDetailPage />} />
         <Route path="checkout" element={<RoleRoute allowedRoles={["user"]}><CheckoutPage /></RoleRoute>} />
@@ -93,6 +98,7 @@ export function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="superadmin/settings" element={<RoleRoute allowedRoles={["super_admin", "owner"]}><SuperadminSettingsPage /></RoleRoute>} />
         <Route path="users" element={<RoleRoute allowedRoles={["admin", "super_admin", "owner"]}><UsersPage /></RoleRoute>} />
+        <Route path="iam" element={<RoleRoute allowedRoles={["admin", "super_admin", "owner"]}><IamAdminPage /></RoleRoute>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

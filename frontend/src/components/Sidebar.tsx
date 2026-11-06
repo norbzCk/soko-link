@@ -14,7 +14,10 @@ import {
   Store,
   CreditCard,
   X,
-  ChevronRight
+  ChevronRight,
+  ShieldCheck,
+  BarChart3,
+  BadgeCheck
 } from "lucide-react";
 
 interface SidebarProps {
@@ -46,13 +49,15 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const isLogistics = role === "logistics";
   const isSuperadmin = role === "super_admin" || role === "owner";
   const isAdmin = role === "admin";
+  const isAnalyst = role === "analyst";
   
   const displayName = user?.name || user?.business_name || user?.owner_name || user?.email || "User";
-  const roleLabel = isSeller ? "Business Hub" : isCustomer ? "Customer Hub" : isLogistics ? "Delivery Workspace" : "Admin Panel";
+  const roleLabel = isSeller ? "Business Hub" : isCustomer ? "Customer Hub" : isLogistics ? "Delivery Workspace" : isAnalyst ? "Analytics Workspace" : "Admin Panel";
 
   const navItems = [
     { to: "/app/superadmin", label: "Dashboard", icon: LayoutDashboard, show: isSuperadmin, end: true },
     { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, show: isAdmin, end: true },
+    { to: "/app/analyst", label: "Analytics", icon: BarChart3, show: isAnalyst, end: true },
     { to: "/app/seller", label: "Dashboard", icon: LayoutDashboard, show: isSeller, end: true },
     { to: "/app/customer", label: "Dashboard", icon: LayoutDashboard, show: isCustomer, end: true },
     { to: "/app/logistics", label: "Deliveries", icon: LayoutDashboard, show: isLogistics, end: true },
@@ -65,6 +70,8 @@ export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     
     { to: "/app/customers", label: "Customers", icon: Users, show: isSuperadmin },
     { to: "/app/users", label: "Directory", icon: Users, show: isSuperadmin || isAdmin },
+    { to: "/app/iam", label: "IAM Console", icon: ShieldCheck, show: isSuperadmin || isAdmin },
+    { to: "/app/roles", label: "Roles & Access", icon: BadgeCheck, show: role !== "super_admin" },
   ];
 
   const sidebarContent = (

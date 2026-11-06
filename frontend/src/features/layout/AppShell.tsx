@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../../features/auth/ThemeContext";
@@ -6,13 +6,13 @@ import { Sidebar } from "../../components/Sidebar";
 import { env } from "../../config/env";
 import { 
   Bell, 
-  Search, 
-  User as UserIcon, 
   Moon, 
   Sun, 
-  Menu
+  Menu,
+  RefreshCw
 } from "lucide-react";
 import { useState } from "react";
+import { getPostLoginPath, normalizeRole } from "../auth/authStorage";
 
 function resolveImageUrl(url?: string | null) {
   const raw = String(url || "").trim();
@@ -34,16 +34,37 @@ function getInitials(name?: string) {
 }
 
 export function AppShell() {
-  const { user } = useAuth();
+  const { user, switchRole } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const { effectiveTheme: theme, toggleTheme } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState(false);
+  const [roleError, setRoleError] = useState("");
 
   const role = String(user?.role || "");
+  const availableRoles = Array.from(
+    new Set((user?.roles || []).map((entry) => normalizeRole(entry)).filter(Boolean))
+  );
+
+  async function handleRoleSwitch(nextRole: string) {
+    if (!nextRole || nextRole === role) return;
+    setRoleError("");
+    setSwitchingRole(true);
+    try {
+      const next = await switchRole(nextRole.toUpperCase());
+      navigate(getPostLoginPath(next), { replace: true });
+    } catch (err) {
+      setRoleError(err instanceof Error ? err.message : "Unable to switch role");
+    } finally {
+      setSwitchingRole(false);
+    }
+  }
   const roleLabel =
     role === "seller" ? "Seller" : 
     role === "user" ? "Buyer" : 
     role === "logistics" ? "Delivery Agent" : 
+    role === "analyst" ? "Analyst" :
     role === "super_admin" ? "Super Admin" : 
     role === "owner" ? "Owner" : "Admin";
 
@@ -60,6 +81,7 @@ export function AppShell() {
     role === "seller" ? "/app/seller/profile" : 
     role === "logistics" ? "/app/logistics/profile" : 
     role === "user" ? "/app/customer/profile" : 
+    role === "analyst" ? "/app/settings" :
     role === "super_admin" ? "/app/superadmin/profile" : "/app/profile";
 
   return (
@@ -88,6 +110,24 @@ export function AppShell() {
             </div>
 
             <div className="flex items-center gap-2 md:gap-4">
+              {availableRoles.length > 1 ? (
+                <label className="relative hidden items-center sm:flex">
+                  <span className="sr-only">Switch active role</span>
+                  <RefreshCw size={14} className={`pointer-events-none absolute left-3 text-text-muted ${switchingRole ? "animate-spin" : ""}`} />
+                  <select
+                    value={role}
+                    disabled={switchingRole}
+                    onChange={(event) => void handleRoleSwitch(event.target.value)}
+                    className="h-10 appearance-none rounded-xl border border-border bg-surface-soft pl-9 pr-8 text-[10px] font-black uppercase tracking-widest text-text outline-none transition-colors hover:bg-surface-strong focus:border-brand/40 disabled:opacity-60 md:h-12"
+                  >
+                    {availableRoles.map((entry) => (
+                      <option key={entry} value={entry}>
+                        {entry.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <div className="h-8 w-px bg-border mx-1 hidden md:block" />
 
               <div className="flex items-center gap-1 md:gap-2">
@@ -127,6 +167,11 @@ export function AppShell() {
               </Link>
             </div>
           </div>
+          {roleError ? (
+            <div className="mx-auto mt-2 max-w-7xl rounded-xl border border-danger/20 bg-danger/10 px-4 py-2 text-xs font-bold text-danger">
+              {roleError}
+            </div>
+          ) : null}
         </header>
 
         <div className="flex-1 px-4 pb-8 md:px-8">

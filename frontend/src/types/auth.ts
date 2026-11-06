@@ -1,4 +1,4 @@
-export type UserRole = "user" | "seller" | "admin" | "super_admin" | "owner" | "logistics" | "";
+export type UserRole = "user" | "seller" | "admin" | "super_admin" | "owner" | "logistics" | "analyst" | "";
 
 export type UserType = "user" | "business" | "logistics" | "superadmin" | "";
 
@@ -13,6 +13,11 @@ export interface SessionUser {
   business_name?: string;
   owner_name?: string;
   is_verified?: boolean;
+  is_active?: boolean;
+  active_role?: string;
+  roles?: string[];
+  user_type?: UserType | string;
+  account_status?: string;
 }
 
 export interface AuthResponse {

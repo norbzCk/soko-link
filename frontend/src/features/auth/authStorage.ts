@@ -9,6 +9,8 @@ export function normalizeRole(value?: string) {
   const role = String(value || "").trim().toLowerCase();
   if (role === "customer") return "user";
   if (role === "business") return "seller";
+  if (role === "logistics_provider") return "logistics";
+  if (role === "administrator") return "admin";
   return role;
 }
 
@@ -82,10 +84,15 @@ export function hasSuperadminAccess(role?: string) {
   return normalizeRole(role) === "super_admin";
 }
 
+export function hasAnalystAccess(role?: string) {
+  return normalizeRole(role) === "analyst";
+}
+
 export function getPostLoginPath(user?: SessionUser | null) {
   const userType = getStoredUserType().toLowerCase();
   const role = normalizeRole(String(user?.role || ""));
   if (userType === "superadmin" || role === "super_admin" || role === "owner") return "/app/superadmin";
+  if (role === "analyst") return "/app/analyst";
   if (userType === "logistics" || role === "logistics") return "/app/logistics";
   if (userType === "business" || role === "seller") return "/app/seller";
   if (hasAdminAccess(role)) return "/app/dashboard";
