@@ -36,6 +36,7 @@ import { VerifyEmailPage } from "../pages/VerifyEmailPage";
 import { ProductDetailPage } from "../pages/ProductDetailPage";
 import { TrackDeliveryPage } from "../pages/TrackDeliveryPage";
 import { CheckoutPage } from "../pages/CheckoutPage";
+import { NotFoundPage } from "../pages/NotFoundPage";
 
 function AppLanding() {
   const { user } = useAuth();
@@ -101,7 +102,7 @@ export function App() {
         <Route path="iam" element={<RoleRoute allowedRoles={["admin", "super_admin", "owner"]}><IamAdminPage /></RoleRoute>} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

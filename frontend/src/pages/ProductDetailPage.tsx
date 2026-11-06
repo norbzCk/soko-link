@@ -20,29 +20,17 @@ import {
 import { apiRequest } from "../lib/http";
 import { useAuth } from "../features/auth/AuthContext";
 import { useCart } from "../features/auth/CartContext";
+import { useToast } from "../components/ui/Toast";
 import { Modal } from "../components/Modal";
 import type { Product } from "../types/domain";
+import { formatMoney, resolveImageUrl } from "../lib/format";
 import { env } from "../config/env";
-
-const FALLBACK_IMAGE = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80";
-
-function formatMoney(value?: number) {
-  return `TZS ${Number(value || 0).toLocaleString()}`;
-}
-
-function resolveImageUrl(url?: string | null) {
-  const raw = String(url || "").trim();
-  if (!raw) return FALLBACK_IMAGE;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (raw.startsWith("data:")) return raw;
-  if (raw.startsWith("/")) return `${env.apiBase}${raw}`;
-  return `${env.apiBase}/${raw.replace(/^\/+/, "")}`;
-}
 
 export function ProductDetailPage() {
   const { productId } = useParams<{ productId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { toast } = useToast();
   const { addToCart, setIsOpen } = useCart();
   const [product, setProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -322,6 +310,7 @@ export function ProductDetailPage() {
                       seller_id: product.seller_id,
                       seller_name: product.seller_name || null,
                     });
+                    toast(`Added "${product.name || 'Item'}" to your cart.`, "success");
                     setIsOpen(true);
                   }}
                 >

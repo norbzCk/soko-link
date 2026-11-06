@@ -18,11 +18,8 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { useCart } from "../auth/CartContext";
 import { apiRequest } from "../../lib/http";
+import { formatMoney } from "../../lib/format";
 import type { CartOptimization } from "../../types/domain";
-
-function formatMoney(value?: number) {
-  return `TZS ${Number(value || 0).toLocaleString()}`;
-}
 
 const sidebarVariants = {
   hidden: { x: "100%", opacity: 0.5 },
@@ -45,12 +42,8 @@ export function CartSidebar() {
   const location = useLocation();
   const [optimization, setOptimization] = useState<CartOptimization | null>(null);
 
-  const canShowCartUi =
-    location.pathname === "/" ||
-    location.pathname.startsWith("/product/") ||
-    location.pathname.startsWith("/app/products") ||
-    location.pathname.startsWith("/app/orders") ||
-    location.pathname.startsWith("/app/customer");
+  const isNonBuyerDashboard = user?.role && !["user"].includes(user.role);
+  const canShowCartUi = !isNonBuyerDashboard;
 
   useEffect(() => {
     let cancelled = false;

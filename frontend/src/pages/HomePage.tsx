@@ -37,6 +37,7 @@ import { useCart } from "../features/auth/CartContext";
 import { env } from "../config/env";
 import { getPostLoginPath } from "../features/auth/authStorage";
 import { apiRequest } from "../lib/http";
+import { formatMoney, resolveImageUrl } from "../lib/format";
 import type { Product } from "../types/domain";
 
 const FALLBACK_IMAGE = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80";
@@ -115,19 +116,6 @@ type ProductSearchResponse = {
   categories?: string[];
 };
 
-function formatMoney(value?: number) {
-  return `TZS ${Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-}
-
-function resolveImageUrl(url?: string | null) {
-  const raw = String(url || "").trim();
-  if (!raw) return FALLBACK_IMAGE;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (raw.startsWith("data:")) return raw;
-  if (raw.startsWith("/")) return `${env.apiBase}${raw}`;
-  return `${env.apiBase}/${raw.replace(/^\/+/, "")}`;
-}
-
 export function HomePage() {
   const { token, user, loading } = useAuth();
   const { addToCart, setIsOpen } = useCart();
@@ -155,8 +143,6 @@ export function HomePage() {
   const [isTickerLoading, setIsTickerLoading] = useState(true);
   const [tickerError, setTickerError] = useState("");
 
-  const [hasScrolledToFeed, setHasScrolledToFeed] = useState(false);
-
   useEffect(() => {
     if (!loading && token && user) {
       navigate(getPostLoginPath(user), { replace: true });
@@ -166,13 +152,6 @@ export function HomePage() {
   useEffect(() => {
     void load();
   }, []);
-
-  useEffect(() => {
-    if (!isLoadingProducts && allItems.length > 0 && !hasScrolledToFeed) {
-      setHasScrolledToFeed(true);
-      document.getElementById("products")?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [isLoadingProducts, allItems, hasScrolledToFeed]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -370,19 +349,19 @@ export function HomePage() {
                 <img src={logoUrl} alt="SokoLink" className="w-full h-full object-contain" />
               </div>
               <div className="hidden sm:flex flex-col">
-                <span className="font-display font-black text-xl tracking-tight text-text leading-none">SokoLnk</span>
+                <span className="font-display font-black text-xl tracking-tight text-text leading-none">Soko-Link</span>
                 <span className="text-[8px] uppercase font-black text-brand tracking-[0.2em] mt-1">Smart Network</span>
               </div>
             </Link>
 
-            <div className="flex-1 max-w-xl hidden lg:flex relative group">
+            <div className="flex-1 max-w-xl hidden md:flex relative group">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-text-muted group-focus-within:text-brand transition-all">
                 <Search size={18} />
               </div>
               <input
                 type="text"
                 className="w-full pl-11 pr-5 py-2.5 bg-surface-soft border border-transparent focus:border-brand/20 focus:bg-surface rounded-2xl transition-all outline-none text-xs font-bold text-text placeholder:text-text-muted shadow-sm group-hover:shadow-md"
-                placeholder="Search inventory or verified suppliers..."
+                placeholder="Search products, brands, or verified suppliers..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -411,6 +390,22 @@ export function HomePage() {
                 Join Network
                 <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
               </Link>
+            </div>
+          </div>
+          {/* Mobile search bar */}
+          <div className="px-4 pt-3 pb-1 md:hidden">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                <Search size={16} />
+              </div>
+              <input
+                type="text"
+                className="w-full pl-10 pr-4 py-2 bg-surface-soft border border-border/60 focus:border-brand/40 focus:bg-surface rounded-xl outline-none text-xs font-semibold text-text placeholder:text-text-muted"
+                placeholder="Search products or suppliers..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              />
             </div>
           </div>
         </nav>
@@ -693,10 +688,10 @@ export function HomePage() {
                 <div className="w-10 h-10 rounded-xl bg-brand flex items-center justify-center p-1.5 shadow-lg">
                   <img src={logoUrl} alt="SokoLink" className="w-full h-full object-contain" />
                 </div>
-                <span className="font-display font-black text-2xl tracking-tight text-white leading-none">SokoLnk</span>
+                <span className="font-display font-black text-2xl tracking-tight text-white leading-none">Soko-Link</span>
               </div>
               <p className="text-white/50 font-medium text-sm leading-relaxed max-w-sm">
-                The platform command for modern commerce. Systematic sourcing, verified trust, and transparent fulfillment protocols for global enterprises.
+                The premier digital commerce platform connecting businesses, buyers, and verified logistics networks with high-trust fulfillment.
               </p>
               <div className="flex gap-4">
                 {[
@@ -754,7 +749,7 @@ export function HomePage() {
                   </li>
                   <li className="flex items-center gap-3 text-white/50 font-bold text-xs">
                     <MapPin size={14} className="text-brand" />
-                    SokoLnk Hub, DSM
+                    Soko-Link Hub, DSM
                   </li>
                 </ul>
                 <div className="pt-4 space-y-4">
@@ -771,7 +766,7 @@ export function HomePage() {
           {/* Bottom Bar */}
           <div className="pt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-8">
             <div className="flex flex-col md:flex-row items-center gap-8">
-              <p className="text-white/20 text-[9px] font-black uppercase tracking-[0.4em]">© 2026 SOKOLNK SMART MARKETPLACE</p>
+              <p className="text-white/20 text-[9px] font-black uppercase tracking-[0.4em]">© 2026 SOKO-LINK SMART MARKETPLACE</p>
               <div className="flex gap-6">
                 {["Privacy Protocol", "Terms of Service", "Cookie Policy"].map(legal => (
                   <a key={legal} href="#" className="text-white/20 hover:text-white transition-colors text-[9px] font-black uppercase tracking-widest">{legal}</a>
