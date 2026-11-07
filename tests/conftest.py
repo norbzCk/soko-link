@@ -1,3 +1,15 @@
+import os
+
+# Must run before backend.api.main is imported: SMTP settings are captured at
+# module import time. Keep tests hermetic even when the project .env enables SMTP.
+os.environ["SMTP_HOST"] = ""
+os.environ["SMTP_FROM_EMAIL"] = ""
+os.environ["SMTP_USERNAME"] = ""
+os.environ["SMTP_PASSWORD"] = ""
+# Tests authenticate against the known development superadmin bootstrap.
+os.environ["SUPERADMIN_EMAIL"] = "superadmin@gmail.com"
+os.environ["SUPERADMIN_PASSWORD"] = "adminkey"
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session

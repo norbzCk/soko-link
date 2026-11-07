@@ -129,6 +129,16 @@ def send_email_message(recipient: str, subject: str, body: str) -> None:
         server.send_message(message)
 
 
+def send_email_message_safely(recipient: str, subject: str, body: str) -> None:
+    try:
+        send_email_message(recipient, subject, body)
+    except Exception:
+        logger.exception(
+            "Notification email failed to send",
+            extra={"recipient": recipient, "subject": subject},
+        )
+
+
 def create_notification(
     db: Session,
     *,
@@ -163,12 +173,9 @@ def create_notification(
 
     if send_email and recipient_email and email_subject and email_body and smtp_enabled():
         if background_tasks is not None:
-            background_tasks.add_task(send_email_message, recipient_email, email_subject, email_body)
+            background_tasks.add_task(send_email_message_safely, recipient_email, email_subject, email_body)
         else:
-            try:
-                send_email_message(recipient_email, email_subject, email_body)
-            except Exception:
-                logger.exception("Failed to send notification email", extra={"recipient": recipient_email, "subject": email_subject})
+            send_email_message_safely(recipient_email, email_subject, email_body)
 
     return record
 

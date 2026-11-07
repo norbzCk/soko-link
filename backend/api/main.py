@@ -3,6 +3,11 @@ from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+_BASE_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(_BASE_DIR / ".env", override=False)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
