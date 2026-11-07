@@ -9,66 +9,59 @@ interface ModalProps {
 }
 
 /**
- * Modal component with enhanced dismissal behavior:
- * - Click on the overlay (outside the modal content) closes the modal.
- * - Pressing the Escape key closes the modal.
- * - The close button also closes the modal.
+ * Accessible-feeling modal with sensible dismissal behaviour:
+ * - Clicking the overlay closes it.
+ * - Pressing Escape closes it.
+ * - The close button closes it.
+ *
+ * Hooks are always called in the same order (the component renders `null`
+ * while closed rather than returning before `useEffect`).
  */
 export function Modal({ isOpen, onClose, title, children }: ModalProps) {
-  // Do not render anything if the modal is not open.
-  if (!isOpen) {
-    return null;
-  }
-
-  // Attach a keydown listener to close the modal when Escape is pressed.
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
+      if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
     };
-  }, [onClose]);
+  }, [isOpen, onClose]);
 
-  // Find the modal root element where the portal will be rendered.
+  if (!isOpen) return null;
+
   const modalRoot = document.getElementById("modal-root");
   if (!modalRoot) {
     console.error(
-      "Modal root element not found in the DOM. Please add <div id='modal-root'></div> to your index.html."
+      "Modal root element not found in the DOM. Please add <div id='modal-root'></div> to your index.html.",
     );
     return null;
   }
 
-  /**
-   * Handle clicks on the overlay. If the click target is the overlay itself
-   * (i.e., not a descendant of the modal content), close the modal.
-   */
-  const handleOverlayClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
-      onClose();
-    }
-  };
-
   return createPortal(
-    <div className="modal-overlay" onClick={handleOverlayClick}>
-      {/* Stop propagation on the content so clicks inside the modal don't trigger the overlay handler */}
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="modal-overlay"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="modal-content" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{title}</h2>
-          <button
-            className="modal-close-button"
-            onClick={onClose}
-            aria-label="Close modal"
-          >
+          <button className="modal-close-button" onClick={onClose} aria-label="Close modal">
             &times;
           </button>
         </div>
         <div className="modal-body">{children}</div>
       </div>
     </div>,
-    modalRoot
+    modalRoot,
   );
 }

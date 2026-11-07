@@ -1,7 +1,10 @@
-import { FormEvent, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { ChangeEvent, FormEvent, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { AlertCircle, ArrowRight, ImagePlus } from "lucide-react";
 import { AuthScene } from "../components/AuthScene";
 import { apiRequest } from "../lib/http";
+import { Input, Select } from "../components/ui/Field";
+import { Button } from "../components/ui/Button";
 
 export function LogisticsRegisterPage() {
   const navigate = useNavigate();
@@ -11,8 +14,8 @@ export function LogisticsRegisterPage() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] || null;
+  function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
     setPhotoFile(file);
     setPhotoPreview(file ? URL.createObjectURL(file) : null);
   }
@@ -44,14 +47,11 @@ export function LogisticsRegisterPage() {
     form.delete("terms");
 
     try {
-      // Single call: /logistics/register creates the account and sets auth
-      // cookies itself -- no separate pre-registration step needed.
       await apiRequest("/logistics/register", {
         method: "POST",
         body: form,
         auth: false,
       });
-
       navigate("/login?registered=logistics", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
@@ -62,108 +62,109 @@ export function LogisticsRegisterPage() {
   return (
     <AuthScene
       eyebrow="Logistics onboarding"
-      title="Join the delivery network for SokoLnk orders."
-      description="Register a rider or delivery company, manage live availability, and update order statuses seamlessly."
+      title="Join the delivery network."
+      description="Register a rider or delivery company, manage availability, and update order statuses as you go."
       bullets={[
-        "Go online and manage availability in real time",
-        "Track assigned deliveries and update statuses",
-        "Use the same logistics API contract as the legacy app",
+        "Go online and manage availability",
+        "Accept and track assigned deliveries",
+        "Work with sellers across the marketplace",
       ]}
       links={[
         { to: "/login", label: "Back to sign in" },
         { to: "/register/customer", label: "Join as customer" },
       ]}
     >
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+      <div className="space-y-4">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand mb-2">Logistics partner</p>
-          <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white">Logistics registration</h2>
+          <h2 className="font-display text-2xl font-bold tracking-tight text-text">Logistics registration</h2>
+          <p className="mt-1 text-sm text-text-muted">Register as a rider or delivery company.</p>
         </div>
-      </div>
 
-      {error ? <div className="p-4 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl font-bold flex items-center gap-3 border border-red-100 dark:border-red-800">{error}</div> : null}
-
-      <form className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6" onSubmit={handleSubmit}>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Full name</span>
-          <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="name" required />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Phone</span>
-          <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="phone" required placeholder="0712345678" />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Email</span>
-          <input type="email" className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="email" required />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Password</span>
-          <input type="password" className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="password" required minLength={8} placeholder="At least 8 characters, with a number and symbol" />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Confirm password</span>
-          <input type="password" className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="confirm_password" required minLength={8} />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Account type</span>
-          <select className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="account_type" defaultValue="individual">
-            <option value="individual">Individual rider</option>
-            <option value="company">Registered company</option>
-          </select>
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Vehicle type</span>
-          <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="vehicle_type" placeholder="E.g. Motorcycle, Van, Truck" />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Plate number</span>
-          <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="plate_number" />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">License number</span>
-          <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="license_number" />
-        </label>
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Base area</span>
-          <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="base_area" placeholder="E.g. Kariakoo, Sinza" />
-        </label>
-        <label className="block md:col-span-2 space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Coverage areas</span>
-          <input className="mt-1 block w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-brand focus:ring-1 focus:ring-brand" name="coverage_areas" placeholder="Comma separated, e.g. Sinza, Magomeni" />
-        </label>
-        <label className="block md:col-span-2 space-y-2">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Profile photo (optional)</span>
-          <div className="flex items-center gap-3">
-            {photoPreview ? (
-              <img src={photoPreview} alt="Profile preview" className="h-12 w-12 rounded-full object-cover border-2 border-slate-100 dark:border-slate-600" />
-            ) : (
-              <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-300 text-lg font-black">?</div>
-            )}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex-1 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-4 py-3 text-sm font-medium text-slate-500 dark:text-slate-400 text-left truncate hover:border-brand/40"
-            >
-              {photoFile ? photoFile.name : "Choose an image..."}
-            </button>
-            <input
-              ref={fileInputRef}
-              name="profile_photo"
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              onChange={handlePhotoChange}
-              className="hidden"
-            />
+        {error ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-danger/25 bg-danger/10 px-3.5 py-2.5 text-xs font-medium text-danger">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            {error}
           </div>
-        </label>
-        <label className="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" required />
-          <span>I agree to the logistics partner terms, privacy policy, email verification, and administrator approval of my application.</span>
-        </label>
-        <button className="md:col-span-2 px-6 py-3 bg-brand text-white rounded-xl hover:bg-brand/90 transition-all font-medium text-sm shadow-lg" disabled={isSubmitting} type="submit">
-          {isSubmitting ? "Submitting..." : "Register logistics"}
-        </button>
-      </form>
+        ) : null}
+
+        <form className="space-y-3.5" onSubmit={handleSubmit}>
+          <div className="grid gap-3.5 sm:grid-cols-2">
+            <Input label="Full name" name="name" placeholder="Your name" autoComplete="name" required />
+            <Input label="Phone" name="phone" type="tel" placeholder="0712 345 678" autoComplete="tel" required />
+            <Input label="Email" name="email" type="email" placeholder="you@example.com" autoComplete="email" required />
+            <Select label="Account type" name="account_type" defaultValue="individual">
+              <option value="individual">Individual rider</option>
+              <option value="company">Registered company</option>
+            </Select>
+            <Input
+              label="Password"
+              name="password"
+              type="password"
+              minLength={8}
+              placeholder="Min. 8 characters"
+              autoComplete="new-password"
+              required
+            />
+            <Input
+              label="Confirm password"
+              name="confirm_password"
+              type="password"
+              minLength={8}
+              placeholder="Repeat password"
+              autoComplete="new-password"
+              required
+            />
+            <Input label="Vehicle type" name="vehicle_type" placeholder="Motorcycle, van, truck…" />
+            <Input label="Plate number" name="plate_number" placeholder="T 123 ABC" />
+            <Input label="License number" name="license_number" placeholder="Driving licence no." />
+            <Input label="Base area" name="base_area" placeholder="Kariakoo, Sinza…" />
+          </div>
+
+          <Input label="Coverage areas" name="coverage_areas" placeholder="Comma separated, e.g. Sinza, Magomeni" />
+
+          <div className="field">
+            <span className="field-label">Profile photo (optional)</span>
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-surface-soft">
+                {photoPreview ? (
+                  <img src={photoPreview} alt="Profile preview" className="h-full w-full object-cover" />
+                ) : (
+                  <ImagePlus size={18} className="text-text-muted" />
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-xl border border-dashed border-border bg-surface-soft px-3 py-2.5 text-xs font-medium text-text-muted transition-colors hover:border-brand/40 hover:text-text"
+              >
+                {photoFile ? photoFile.name : "Choose image"}
+              </button>
+              <input
+                ref={fileInputRef}
+                name="profile_photo"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={handlePhotoChange}
+                className="hidden"
+              />
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2.5 rounded-xl border border-border bg-surface-soft/60 p-3 text-xs font-medium leading-relaxed text-text-muted">
+            <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border accent-[var(--brand)]" required />
+            <span>I agree to the logistics partner terms, privacy policy, email verification, and administrator approval of my application.</span>
+          </label>
+
+          <Button type="submit" fullWidth loading={isSubmitting} iconRight={<ArrowRight size={16} />}>
+            {isSubmitting ? "Submitting application…" : "Create logistics account"}
+          </Button>
+        </form>
+
+        <p className="text-center text-xs text-text-muted">
+          Already registered?{" "}
+          <Link to="/login" className="font-semibold text-brand hover:underline">Sign in</Link>
+        </p>
+      </div>
     </AuthScene>
   );
 }

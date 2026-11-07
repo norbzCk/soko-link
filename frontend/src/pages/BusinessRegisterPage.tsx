@@ -1,7 +1,10 @@
-import { FormEvent, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { ChangeEvent, FormEvent, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { AlertCircle, ArrowRight, ImagePlus } from "lucide-react";
 import { AuthScene } from "../components/AuthScene";
 import { apiRequest } from "../lib/http";
+import { Input, Select, Textarea } from "../components/ui/Field";
+import { Button } from "../components/ui/Button";
 
 export function BusinessRegisterPage() {
   const navigate = useNavigate();
@@ -11,14 +14,10 @@ export function BusinessRegisterPage() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] || null;
+  function handleLogoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
     setLogoFile(file);
-    if (file) {
-      setLogoPreview(URL.createObjectURL(file));
-    } else {
-      setLogoPreview(null);
-    }
+    setLogoPreview(file ? URL.createObjectURL(file) : null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -27,15 +26,11 @@ export function BusinessRegisterPage() {
     setIsSubmitting(true);
 
     const form = new FormData(event.currentTarget);
-    // FormData already picked up every named <input>/<select> in the form,
-    // including the file input (name="logo") if one was chosen -- just
-    // trim the text fields in place rather than rebuilding the payload.
     for (const key of ["business_name", "owner_name", "email", "phone", "area", "street", "shop_number", "operating_hours", "description"]) {
       const value = form.get(key);
       if (typeof value === "string") form.set(key, value.trim());
     }
-    const emailValue = String(form.get("email") || "").toLowerCase();
-    form.set("email", emailValue);
+    form.set("email", String(form.get("email") || "").toLowerCase());
 
     const password = String(form.get("password") || "");
     if (password !== String(form.get("confirm_password") || "")) {
@@ -52,19 +47,11 @@ export function BusinessRegisterPage() {
     form.delete("terms");
 
     try {
-      // Single call: /business/register creates the account, sets auth
-      // cookies, and returns its own access token -- it doesn't need (and
-      // previously was broken by) a separate pre-registration step.
       await apiRequest("/business/register", {
         method: "POST",
         body: form,
         auth: false,
       });
-
-      // Redirect to login rather than auto-logging in: keeps registration
-      // and authentication as two clearly separate steps, and avoids ever
-      // risking a mismatched session (the bug this used to have, where the
-      // stored token didn't match the account that was actually created).
       navigate("/login?registered=seller", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
@@ -72,122 +59,124 @@ export function BusinessRegisterPage() {
     }
   }
 
-  const InputField = ({ name, label, type = "text", required = false, placeholder = "", defaultValue = "" }: any) => (
-    <div className="space-y-1.5">
-      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>
-      <input 
-        name={name}
-        type={type}
-        required={required}
-        placeholder={placeholder}
-        defaultValue={defaultValue}
-        className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-xl outline-none transition-all font-semibold text-sm"
-      />
-    </div>
-  );
-
   return (
     <AuthScene
       eyebrow="Business onboarding"
-      title="Open your business storefront on SokoLnk."
-      description="Set up your seller profile and organize your product catalog instantly."
+      title="Open your storefront on Soko-Link."
+      description="Set up your seller profile, list products, and manage orders from a single workspace."
       bullets={[
         "Create a seller-ready account in one step",
-        "Build trust with verified badges",
-        "Access advanced marketplace analytics",
+        "Build trust with verification badges",
+        "Access marketplace analytics",
       ]}
       links={[
         { to: "/login", label: "Back to sign in" },
         { to: "/register/customer", label: "Join as customer" },
       ]}
     >
-      <div className="space-y-8 max-w-2xl mx-auto lg:max-w-none">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight">Business Registration</h2>
-          <p className="text-slate-500 font-medium">Launch your digital storefront today.</p>
+      <div className="space-y-4">
+        <div>
+          <h2 className="font-display text-2xl font-bold tracking-tight text-text">Business registration</h2>
+          <p className="mt-1 text-sm text-text-muted">Tell us about your business.</p>
         </div>
 
         {error ? (
-          <div className="p-4 bg-red-50 text-red-700 rounded-2xl font-bold flex items-center gap-3 border border-red-100">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-            </svg>
+          <div className="flex items-start gap-2.5 rounded-xl border border-danger/25 bg-danger/10 px-3.5 py-2.5 text-xs font-medium text-danger">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
             {error}
           </div>
         ) : null}
 
-        <form className="grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={handleSubmit}>
-          <InputField name="business_name" label="Business Name" required placeholder="E.g. Soko Retailers" />
-          <InputField name="owner_name" label="Owner Name" required placeholder="Full Name" />
-          <InputField name="email" label="Email Address" type="email" required placeholder="business@example.com" />
-          <InputField name="phone" label="Phone Number" required placeholder="0712345678" />
-          
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Business Type</label>
-            <select name="business_type" defaultValue="individual" className="w-full px-4 py-3 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-xl outline-none transition-all font-semibold text-sm appearance-none cursor-pointer">
+        <form className="space-y-3.5" onSubmit={handleSubmit}>
+          <div className="grid gap-3.5 sm:grid-cols-2">
+            <Input label="Business name" name="business_name" placeholder="Soko Retailers" required />
+            <Input label="Owner name" name="owner_name" placeholder="Full name" required />
+            <Input label="Email" name="email" type="email" placeholder="business@example.com" autoComplete="email" required />
+            <Input label="Phone" name="phone" type="tel" placeholder="0712 345 678" autoComplete="tel" required />
+            <Select label="Business type" name="business_type" defaultValue="individual">
               <option value="individual">Individual trader</option>
               <option value="company">Registered company</option>
-            </select>
+            </Select>
+            <Input label="Category" name="category" placeholder="Electronics" />
+            <Input label="Region" name="region" defaultValue="Dar es Salaam" />
+            <Input label="Area" name="area" placeholder="Kariakoo" />
+            <Input label="Street address" name="street" placeholder="Street" />
+            <Input label="Shop number" name="shop_number" placeholder="Shop no." />
           </div>
 
-          <InputField name="category" label="Category" placeholder="E.g. Electronics" />
-          <InputField name="region" label="Region" defaultValue="Dar es Salaam" />
-          <InputField name="area" label="Area" placeholder="E.g. Kariakoo" />
-          <InputField name="street" label="Street Address" />
-          <InputField name="shop_number" label="Shop Number" />
-          <InputField name="operating_hours" label="Operating Hours" placeholder="Mon-Sat 08:00-18:00" />
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Shop Logo</label>
-            <div className="flex items-center gap-3">
-              {logoPreview ? (
-                <img src={logoPreview} alt="Logo preview" className="h-12 w-12 rounded-xl object-cover border-2 border-slate-100" />
-              ) : (
-                <div className="h-12 w-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-300 text-lg font-black">?</div>
-              )}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-1 px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 hover:border-brand/40 rounded-xl outline-none transition-all font-semibold text-sm text-slate-500 text-left truncate"
-              >
-                {logoFile ? logoFile.name : "Choose an image..."}
-              </button>
-              <input
-                ref={fileInputRef}
-                name="logo"
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                onChange={handleLogoChange}
-                className="hidden"
-              />
+          <div className="grid gap-3.5 sm:grid-cols-[1fr_auto] sm:items-end">
+            <Input label="Operating hours" name="operating_hours" placeholder="Mon–Sat, 08:00–18:00" />
+            <div className="field">
+              <span className="field-label">Shop logo</span>
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-soft">
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="Logo preview" className="h-full w-full object-cover" />
+                  ) : (
+                    <ImagePlus size={18} className="text-text-muted" />
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="max-w-[9rem] truncate rounded-xl border border-dashed border-border bg-surface-soft px-3 py-2.5 text-left text-xs font-medium text-text-muted transition-colors hover:border-brand/40 hover:text-text"
+                >
+                  {logoFile ? logoFile.name : "Choose image"}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  name="logo"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={handleLogoChange}
+                  className="hidden"
+                />
+              </div>
             </div>
           </div>
-          
-          <div className="md:col-span-2">
-            <InputField name="description" label="Business Description" placeholder="Describe your business and what you sell..." />
+
+          <Textarea
+            label="Business description"
+            name="description"
+            rows={2}
+            placeholder="What do you sell? Where do you operate?"
+          />
+
+          <div className="grid gap-3.5 sm:grid-cols-2">
+            <Input
+              label="Password"
+              name="password"
+              type="password"
+              minLength={8}
+              placeholder="Min. 8 characters"
+              autoComplete="new-password"
+              required
+            />
+            <Input
+              label="Confirm password"
+              name="confirm_password"
+              type="password"
+              minLength={8}
+              placeholder="Repeat password"
+              autoComplete="new-password"
+              required
+            />
           </div>
-          
-          <div className="md:col-span-2">
-            <InputField name="password" label="Password" type="password" required placeholder="At least 8 characters, with a number and symbol" />
-          </div>
-          <div className="md:col-span-2">
-            <InputField name="confirm_password" label="Confirm Password" type="password" required placeholder="Repeat your password" />
-          </div>
-          <label className="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600">
-            <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" required />
-            <span>I agree to the seller terms, privacy policy, email verification, and administrator approval of my seller application.</span>
+
+          <label className="flex items-start gap-2.5 rounded-xl border border-border bg-surface-soft/60 p-3 text-xs font-medium leading-relaxed text-text-muted">
+            <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border accent-[var(--brand)]" required />
+            <span>I agree to the seller terms, privacy policy, email verification, and administrator approval of my application.</span>
           </label>
 
-          <div className="md:col-span-2 pt-4">
-            <button 
-              className="w-full btn-primary !py-4 shadow-brand/30" 
-              disabled={isSubmitting} 
-              type="submit"
-            >
-              {isSubmitting ? "Onboarding..." : "Register Business"}
-            </button>
-          </div>
+          <Button type="submit" fullWidth loading={isSubmitting} iconRight={<ArrowRight size={16} />}>
+            {isSubmitting ? "Submitting application…" : "Create business account"}
+          </Button>
         </form>
+
+        <p className="text-center text-xs text-text-muted">
+          Already registered?{" "}
+          <Link to="/login" className="font-semibold text-brand hover:underline">Sign in</Link>
+        </p>
       </div>
     </AuthScene>
   );

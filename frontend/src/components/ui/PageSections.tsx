@@ -19,20 +19,20 @@ type StatItem = {
 
 export function PageIntro({ eyebrow, title, description, actions, badges }: PageIntroProps) {
   return (
-    <motion.section 
-      initial={{ opacity: 0, y: -20 }}
+    <motion.section
+      initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="relative overflow-hidden rounded-[2.5rem] border border-border bg-surface/80 p-8 shadow-premium backdrop-blur-xl lg:p-10"
+      className="relative overflow-hidden rounded-[1.25rem] border border-border bg-surface p-5 shadow-soft sm:p-6"
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.08),transparent_40%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.05),transparent_35%)]" />
-      <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-3xl space-y-4">
-          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-brand">{eyebrow}</p>
-          <h1 className="font-display text-4xl font-black tracking-tight text-text md:text-5xl">{title}</h1>
-          <p className="max-w-2xl text-base leading-relaxed text-text-muted">{description}</p>
-          {badges ? <div className="flex flex-wrap gap-2 pt-2">{badges}</div> : null}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,90,167,0.06),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(239,159,47,0.06),transparent_38%)]" />
+      <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-3xl space-y-1.5">
+          <p className="eyebrow">{eyebrow}</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-text sm:text-3xl">{title}</h1>
+          <p className="max-w-2xl text-sm leading-relaxed text-text-muted">{description}</p>
+          {badges ? <div className="flex flex-wrap gap-2 pt-1.5">{badges}</div> : null}
         </div>
-        {actions ? <div className="relative flex flex-wrap gap-4">{actions}</div> : null}
+        {actions ? <div className="relative flex flex-wrap gap-2">{actions}</div> : null}
       </div>
     </motion.section>
   );
@@ -76,14 +76,14 @@ export function SectionCard({
 }) {
   return (
     <section className={`glass-card overflow-hidden${className ? ` ${className}` : ""}`}>
-      <div className="flex flex-col gap-4 border-b border-border bg-surface-soft/30 px-8 py-6 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <h2 className="font-display text-2xl font-black tracking-tight text-text">{title}</h2>
-          {description ? <p className="max-w-2xl text-sm font-medium text-text-muted">{description}</p> : null}
+      <div className="flex flex-col gap-2 border-b border-border bg-surface-soft/30 px-4 py-3.5 sm:px-5 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-0.5">
+          <h2 className="font-display text-base font-semibold tracking-tight text-text">{title}</h2>
+          {description ? <p className="max-w-2xl text-xs text-text-muted">{description}</p> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="p-8">{children}</div>
+      <div className="p-4 sm:p-5">{children}</div>
     </section>
   );
 }
@@ -100,19 +100,19 @@ export function EmptyState({
   icon?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-[2.5rem] border-2 border-dashed border-border bg-surface-soft/40 px-8 py-16 text-center">
-      <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-surface text-text-muted shadow-premium border border-border" aria-hidden="true">
+    <div className="flex flex-col items-center justify-center rounded-[1.25rem] border border-dashed border-border bg-surface-soft/40 px-6 py-12 text-center">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-surface text-text-muted shadow-soft" aria-hidden="true">
         {icon || (
-          <svg className="h-10 w-10" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <svg className="h-7 w-7" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 7.5A2.5 2.5 0 016.5 5h11A2.5 2.5 0 0120 7.5v9A2.5 2.5 0 0117.5 19h-11A2.5 2.5 0 014 16.5v-9z" />
           </svg>
         )}
       </div>
-      <div className="max-w-md space-y-3">
-        <h3 className="font-display text-2xl font-black tracking-tight text-text">{title}</h3>
-        <p className="text-base font-medium text-text-muted leading-relaxed">{description}</p>
+      <div className="max-w-md space-y-1.5">
+        <h3 className="font-display text-lg font-semibold tracking-tight text-text">{title}</h3>
+        <p className="text-sm leading-relaxed text-text-muted">{description}</p>
       </div>
-      {action ? <div className="mt-8">{action}</div> : null}
+      {action ? <div className="mt-5">{action}</div> : null}
     </div>
   );
 }
@@ -142,7 +142,7 @@ type InlineNoticeProps = {
 export function InlineNotice({ tone, children }: InlineNoticeProps) {
   const styles: Record<string, string> = {
     info: "bg-brand/10 text-brand border-brand/20",
-    success: "bg-accent/10 text-accent border-accent/20",
+    success: "bg-success/10 text-success border-success/20",
     warning: "bg-amber-500/10 text-amber-600 border-amber-500/20",
     error: "bg-danger/10 text-danger border-danger/20",
   };

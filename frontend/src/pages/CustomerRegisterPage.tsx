@@ -1,7 +1,10 @@
 import { FormEvent, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { AlertCircle, ArrowRight } from "lucide-react";
 import { AuthScene } from "../components/AuthScene";
-import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../lib/http";
+import { Input } from "../components/ui/Field";
+import { Button } from "../components/ui/Button";
 
 export function CustomerRegisterPage() {
   const navigate = useNavigate();
@@ -34,10 +37,6 @@ export function CustomerRegisterPage() {
     };
 
     try {
-      // Called directly rather than through AuthContext's register(), which
-      // auto-persists a session on success -- registration and signing in
-      // are kept as two separate steps here, consistent with the seller
-      // and logistics registration flows.
       await apiRequest("/auth/register", {
         method: "POST",
         body: payload,
@@ -54,7 +53,7 @@ export function CustomerRegisterPage() {
     <AuthScene
       eyebrow="Customer onboarding"
       title="Create your buyer account and start sourcing."
-      description="Join the marketplace, compare suppliers, and track orders inside the customer dashboard."
+      description="Join the marketplace, compare suppliers, and track orders inside your customer workspace."
       bullets={[
         "Browse verified products and suppliers",
         "Submit RFQs and place orders faster",
@@ -65,84 +64,60 @@ export function CustomerRegisterPage() {
         { to: "/register/business", label: "Need a seller account?" },
       ]}
     >
-      <div className="space-y-8">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight">Customer Registration</h2>
-          <p className="text-slate-500 font-medium">Enter your details to create your account.</p>
+      <div className="space-y-5">
+        <div>
+          <h2 className="font-display text-2xl font-bold tracking-tight text-text">Create your account</h2>
+          <p className="mt-1 text-sm text-text-muted">It only takes a minute.</p>
         </div>
 
         {error ? (
-          <div className="p-4 bg-red-50 text-red-700 rounded-2xl font-bold flex items-center gap-3 border border-red-100 animate-in fade-in slide-in-from-top-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-            </svg>
+          <div className="flex items-start gap-2.5 rounded-xl border border-danger/25 bg-danger/10 px-3.5 py-2.5 text-xs font-medium text-danger">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
             {error}
           </div>
         ) : null}
 
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <div className="space-y-2">
-            <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Full Name</label>
-            <input
-              name="name"
-              className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
-              placeholder="John Doe"
-              required
-            />
+        <form className="space-y-3.5" onSubmit={handleSubmit}>
+          <Input label="Full name" name="name" placeholder="John Doe" autoComplete="name" required />
+          <div className="grid gap-3.5 sm:grid-cols-2">
+            <Input label="Email" name="email" type="email" placeholder="john@example.com" autoComplete="email" required />
+            <Input label="Phone" name="phone" type="tel" placeholder="0712 345 678" autoComplete="tel" required />
           </div>
-          <div className="space-y-2">
-            <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Email Address</label>
-            <input
-              name="email"
-              type="email"
-              className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
-              placeholder="john@example.com"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Phone Number</label>
-            <input
-              name="phone"
-              className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
-              placeholder="07..."
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Password</label>
-            <input
+          <div className="grid gap-3.5 sm:grid-cols-2">
+            <Input
+              label="Password"
               name="password"
               type="password"
               minLength={8}
-              className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
-              placeholder="At least 8 characters, with a number and symbol"
+              placeholder="Min. 8 characters"
+              autoComplete="new-password"
               required
             />
-          </div>
-          <div className="space-y-2">
-            <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">Confirm Password</label>
-            <input
+            <Input
+              label="Confirm password"
               name="confirm_password"
               type="password"
               minLength={8}
-              className="w-full px-5 py-3.5 bg-slate-50 border-2 border-transparent focus:border-brand/20 focus:bg-white rounded-2xl outline-none transition-all font-semibold"
-              placeholder="Repeat your password"
+              placeholder="Repeat password"
+              autoComplete="new-password"
               required
             />
           </div>
-          <label className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs font-semibold leading-relaxed text-slate-600">
-            <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" required />
+
+          <label className="flex items-start gap-2.5 rounded-xl border border-border bg-surface-soft/60 p-3 text-xs font-medium leading-relaxed text-text-muted">
+            <input name="terms" type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border accent-[var(--brand)]" required />
             <span>I agree to the marketplace terms, privacy policy, and email verification process.</span>
           </label>
-          <button
-            className="w-full btn-primary !py-4 shadow-brand/30 mt-4"
-            disabled={isSubmitting}
-            type="submit"
-          >
-            {isSubmitting ? "Processing..." : "Register Account"}
-          </button>
+
+          <Button type="submit" fullWidth loading={isSubmitting} iconRight={<ArrowRight size={16} />}>
+            {isSubmitting ? "Creating account…" : "Create account"}
+          </Button>
         </form>
+
+        <p className="text-center text-xs text-text-muted">
+          Already have an account?{" "}
+          <Link to="/login" className="font-semibold text-brand hover:underline">Sign in</Link>
+        </p>
       </div>
     </AuthScene>
   );

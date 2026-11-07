@@ -1,22 +1,23 @@
-import { useEffect, useState, MouseEvent } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import { 
-  ShoppingBag, 
-  Zap, 
-  ShieldCheck, 
-  Truck, 
-  Plus, 
-  Minus, 
-  CheckCircle2, 
-  Maximize2, 
-  X,
-  Store,
-  Star,
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
   ArrowLeft,
+  ArrowRight,
+  BadgeCheck,
+  CheckCircle2,
+  Maximize2,
+  Minus,
+  PackageCheck,
+  Plus,
   Share2,
-  Heart
+  ShieldCheck,
+  ShoppingBag,
+  Star,
+  Store,
+  Truck,
+  X,
 } from "lucide-react";
+import logoUrl from "../assets/sokolink-logo.png";
 import { apiRequest } from "../lib/http";
 import { useAuth } from "../features/auth/AuthContext";
 import { useCart } from "../features/auth/CartContext";
@@ -24,24 +25,27 @@ import { useToast } from "../components/ui/Toast";
 import { Modal } from "../components/Modal";
 import type { Product } from "../types/domain";
 import { formatMoney, resolveImageUrl } from "../lib/format";
-import { env } from "../config/env";
+import { ProductCard } from "../components/ui/ProductCard";
+import { Button } from "../components/ui/Button";
+import { Badge } from "../components/ui/Badge";
+import { getPostLoginPath } from "../features/auth/authStorage";
 
 export function ProductDetailPage() {
   const { productId } = useParams<{ productId: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
   const { addToCart, setIsOpen } = useCart();
+
   const [product, setProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [showLightbox, setShowLightbox] = useState(false);
-  const [zoom, setZoom] = useState(false);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
+
+  const isInsideApp = location.pathname.startsWith("/app");
 
   useEffect(() => {
     void load();
@@ -50,14 +54,15 @@ export function ProductDetailPage() {
   async function load() {
     if (!productId) return;
     setLoading(true);
+    setError("");
     try {
       const data = await apiRequest<Product>(`/products/${productId}`);
       setProduct(data);
-      
-      // Load similar products
       if (data.category) {
-        const similar = await apiRequest<{ items: Product[] }>(`/products/public/search?category=${encodeURIComponent(data.category)}&limit=5`);
-        setSimilarProducts((similar.items || []).filter(p => p.id !== data.id));
+        const similar = await apiRequest<{ items: Product[] }>(
+          `/products/public/search?category=${encodeURIComponent(data.category)}&limit=5`,
+        ).catch(() => ({ items: [] as Product[] }));
+        setSimilarProducts((similar.items || []).filter((p) => p.id !== data.id).slice(0, 4));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Product not found");
@@ -66,356 +71,328 @@ export function ProductDetailPage() {
     }
   }
 
-  async function handleOrder() {
+  function handleCheckout() {
+    if (!product) return;
     if (!user) {
-      navigate("/login", { state: { from: `/app/checkout?product=${product?.id || productId}&quantity=${quantity}` } });
+      navigate("/login", {
+        state: { from: `/app/checkout?product=${product.id}&quantity=${quantity}` },
+      });
       return;
     }
-
     if (user.role !== "user") {
-      alert("Only customers can place orders.");
+      toast("Only customer accounts can place orders.", "warning");
       return;
     }
-
-    setSubmitting(true);
-    navigate(`/app/checkout?product=${product?.id || productId}&quantity=${quantity}`);
+    navigate(`/app/checkout?product=${product.id}&quantity=${quantity}`);
   }
 
-  function handleImageMouseMove(e: MouseEvent<HTMLImageElement>) {
-    if (!zoom) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setMousePosition({ x, y });
+  function handleAddToCart() {
+    if (!product) return;
+    addToCart({
+      id: product.id,
+      name: product.name || "Product",
+      price: product.price || 0,
+      image_url: product.image_url,
+      seller_id: product.seller_id,
+      seller_name: product.seller_name || null,
+    });
+    toast(`Added "${product.name || "Item"}" to your cart.`, "success");
+    setIsOpen(true);
   }
 
-  if (loading) return (
-    <div className="min-h-[80vh] flex flex-col items-center justify-center gap-6">
-      <div className="w-16 h-16 border-4 border-brand/20 border-t-brand rounded-full animate-spin" />
-      <p className="font-display font-black text-text-muted uppercase tracking-widest animate-pulse">Loading Product Asset...</p>
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+        <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-brand/20 border-t-brand" />
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Loading product…</p>
+      </div>
+    );
+  }
 
-  if (error || !product) return (
-    <div className="min-h-[60vh] flex items-center justify-center p-8">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="max-w-md w-full glass-card p-12 text-center space-y-6"
-      >
-        <div className="w-24 h-24 bg-danger/10 text-danger rounded-[2rem] flex items-center justify-center mx-auto">
-          <X size={48} />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-3xl font-display font-black text-text tracking-tight uppercase">Unavailable</h2>
-          <p className="text-text-muted font-medium">This product asset could not be synchronized.</p>
-        </div>
-        <button onClick={() => navigate('/app/products')} className="btn-primary w-full h-14">Back to Marketplace</button>
-      </motion.div>
-    </div>
-  );
-
-  const imageUrl = resolveImageUrl(product.image_url);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="max-w-7xl mx-auto py-8 lg:py-12 space-y-12"
-    >
-      {/* Navigation & Breadcrumb */}
-      <div className="flex items-center justify-between">
-        <button 
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-2 text-sm font-bold text-text-muted hover:text-brand transition-colors group"
-        >
-          <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-          Back to Listings
-        </button>
-        <div className="flex items-center gap-4">
-          <button className="h-10 w-10 flex items-center justify-center rounded-xl bg-surface border border-border text-text-muted hover:text-danger hover:border-danger/30 transition-all">
-            <Heart size={18} />
-          </button>
-          <button className="h-10 w-10 flex items-center justify-center rounded-xl bg-surface border border-border text-text-muted hover:text-brand hover:border-brand/30 transition-all">
-            <Share2 size={18} />
-          </button>
+  if (error || !product) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-[1.25rem] border border-border bg-surface p-8 text-center shadow-soft">
+          <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-danger/10 text-danger">
+            <X size={26} />
+          </span>
+          <h2 className="mt-4 font-display text-xl font-semibold text-text">Product unavailable</h2>
+          <p className="mt-1 text-sm text-text-muted">{error || "This listing could not be found."}</p>
+          <Link to="/" className="btn-primary mt-5 w-full">Back to marketplace</Link>
         </div>
       </div>
+    );
+  }
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-start">
-        {/* Left: Premium Image Gallery */}
-        <div className="space-y-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="relative aspect-square md:aspect-[4/5] rounded-[3rem] overflow-hidden bg-white shadow-2xl border border-border group cursor-zoom-in"
+  const outOfStock = !(typeof product.stock === "number" && product.stock > 0);
+  const imageUrl = resolveImageUrl(product.image_url);
+  const sellerName = product.seller_name || product.seller?.business_name || "Independent seller";
+  const verified = String(product.seller?.verification_status || "").toLowerCase() === "verified";
+  const canPurchase = !user || user.role === "user";
+
+  const content = (
+    <div className="mx-auto max-w-7xl space-y-10">
+      {/* Breadcrumb */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => (isInsideApp ? navigate("/app/products") : navigate("/"))}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-text-muted transition-colors hover:text-brand"
+        >
+          <ArrowLeft size={16} />
+          {isInsideApp ? "Back to catalogue" : "Back to marketplace"}
+        </button>
+        <button
+          className="icon-btn !h-9 !w-9"
+          aria-label="Share product"
+          title="Share product"
+          onClick={() => {
+            void navigator.clipboard
+              ?.writeText(window.location.href)
+              .then(() => toast("Product link copied.", "success"))
+              .catch(() => toast("Could not copy the link.", "error"));
+          }}
+        >
+          <Share2 size={16} />
+        </button>
+      </div>
+
+      <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
+        {/* Gallery */}
+        <div className="space-y-3">
+          <button
+            type="button"
             onClick={() => setShowLightbox(true)}
+            className="group relative block aspect-square w-full cursor-zoom-in overflow-hidden rounded-[1.5rem] border border-border bg-surface-soft shadow-soft"
           >
             <img
               src={imageUrl}
               alt={product.name}
-              className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-dark-bg/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-3 px-6 py-3 bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0">
-              <Maximize2 size={18} className="text-white" />
-              <span className="text-[10px] font-black text-white uppercase tracking-widest">Enhanced View</span>
-            </div>
-
-            <div className="absolute top-8 left-8">
-              <span className="px-4 py-2 bg-brand text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl">
-                {product.category || "Premium Listing"}
-              </span>
-            </div>
-          </motion.div>
+            <span className="absolute left-4 top-4 badge badge-brand !bg-white/90 !text-slate-700 backdrop-blur">
+              {product.category || "General"}
+            </span>
+            <span className="absolute bottom-4 right-4 flex items-center gap-1.5 rounded-lg bg-slate-900/70 px-2.5 py-1.5 text-[11px] font-medium text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
+              <Maximize2 size={13} /> Click to zoom
+            </span>
+          </button>
         </div>
 
-        {/* Right: Immersive Product Info */}
-        <div className="space-y-12">
-          <div className="space-y-6">
-            <motion.div 
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="space-y-4"
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={16} className="text-brand" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-brand">Verified SokoLnk Smart Listing</span>
-              </div>
-              <h1 className="text-4xl md:text-6xl font-display font-black text-text leading-[1.1] tracking-tight">
-                {product.name}
-              </h1>
-              <div className="flex items-center gap-4 text-amber-500">
-                <div className="flex items-center gap-1">
-                  {[1, 2, 3, 4, 5].map(i => <Star key={i} size={14} className="fill-current" />)}
-                </div>
-                <span className="text-sm font-black text-text">4.9 (120+ Verified Reviews)</span>
-              </div>
-            </motion.div>
+        {/* Info */}
+        <div className="space-y-6">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              {verified ? (
+                <Badge tone="success" icon={<BadgeCheck size={12} />}>Verified seller</Badge>
+              ) : (
+                <Badge tone="neutral" icon={<Store size={12} />}>Marketplace seller</Badge>
+              )}
+              {outOfStock ? <Badge tone="danger">Out of stock</Badge> : <Badge tone="brand">Ready to ship</Badge>}
+            </div>
+            <h1 className="mt-3 font-display text-3xl font-bold leading-tight tracking-tight text-text sm:text-4xl">
+              {product.name}
+            </h1>
 
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2 }}
-              className="flex flex-wrap items-center gap-8"
-            >
-              <span className="text-4xl md:text-5xl font-display font-black text-text tracking-tight">
-                {formatMoney(product.price)}
+            <div className="mt-2 flex items-center gap-2 text-sm">
+              {typeof product.rating_avg === "number" && product.rating_avg > 0 ? (
+                <>
+                  <span className="flex items-center gap-0.5 text-accent">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Star key={i} size={14} className={i < Math.round(product.rating_avg || 0) ? "fill-current" : "opacity-30"} />
+                    ))}
+                  </span>
+                  <span className="font-semibold text-text">{Number(product.rating_avg).toFixed(1)}</span>
+                  {product.rating_count ? <span className="text-text-muted">({product.rating_count} reviews)</span> : null}
+                </>
+              ) : (
+                <span className="text-text-muted">New listing · no reviews yet</span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-4 rounded-[1.25rem] border border-border bg-surface p-4 shadow-soft">
+            <div>
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-text-muted">Price</span>
+              <span className="font-display text-3xl font-bold tracking-tight text-text">{formatMoney(product.price)}</span>
+            </div>
+            <div className="ml-auto text-right">
+              <span className={`block text-[11px] font-semibold uppercase tracking-wide ${outOfStock ? "text-danger" : "text-success"}`}>
+                {outOfStock ? "Unavailable" : "In stock"}
               </span>
-              <div className="h-10 w-px bg-border hidden sm:block" />
-              <div className="flex flex-col">
-                <span className={`text-[10px] font-black uppercase tracking-widest mb-1 ${product.stock && product.stock > 0 ? 'text-emerald-500' : 'text-danger'}`}>
-                  {product.stock && product.stock > 0 ? 'Immediate Availability' : 'Temporarily Unavailable'}
-                </span>
-                <span className="text-sm font-bold text-text-muted">{product.stock || 0} Professional Units in Stock</span>
-              </div>
-            </motion.div>
+              <span className="text-sm font-medium text-text-muted">
+                {outOfStock ? "Check back soon" : `${product.stock} unit${product.stock === 1 ? "" : "s"} available`}
+              </span>
+            </div>
           </div>
 
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="space-y-4"
-          >
-            <h3 className="text-xs font-black uppercase tracking-widest text-text-muted">Technical Overview</h3>
-            <p className="text-xl text-text-muted font-medium leading-relaxed max-w-2xl">
-              {product.description || "Designed for mission-critical operations, this premium listing features systematic quality control and optimized fulfillment compatibility."}
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">Description</h2>
+            <p className="mt-2 text-sm leading-relaxed text-text-muted">
+              {product.description || "The seller has not added a description for this product yet."}
             </p>
-            <div className="pt-2">
-              <button 
-                onClick={() => {
-                  const el = document.getElementById('similar-products');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="text-[10px] font-black uppercase tracking-[0.2em] text-brand hover:underline"
-              >
-                View Like Products
-              </button>
-            </div>
-          </motion.div>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 py-10 border-y border-border">
-            <div className="space-y-6">
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-text-muted">Verified Merchant</h4>
-              <div className="flex items-center gap-4 group cursor-pointer">
-                <div className="w-16 h-16 rounded-[1.5rem] bg-surface-soft flex items-center justify-center text-brand font-black text-2xl border border-border transition-all group-hover:bg-brand group-hover:text-white group-hover:border-brand shadow-sm">
-                  {(product.seller_name || "S")[0].toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <p className="font-display font-black text-text truncate text-lg leading-none">{product.seller_name || "Independent Seller"}</p>
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <CheckCircle2 size={12} className="text-emerald-500" />
-                    <span className="text-[10px] font-black text-text-muted uppercase tracking-widest">Premium Sourcing Partner</span>
-                  </div>
-                </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
+              <ShieldCheck size={17} className="shrink-0 text-brand" />
+              <div>
+                <p className="text-xs font-semibold text-text">Secure payment</p>
+                <p className="text-[11px] text-text-muted">Confirmed by the platform</p>
               </div>
             </div>
-
-            <div className="space-y-6">
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-text-muted">Fulfillment Edge</h4>
-              <div className="space-y-4">
-                {[
-                  { label: "Secure Smart Payments", icon: Zap },
-                  { label: "Optimized Route Fulfillment", icon: Truck },
-                  { label: "Escrow Protected Sourcing", icon: ShieldCheck }
-                ].map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-3 text-sm font-bold text-text">
-                    <div className="w-8 h-8 rounded-xl bg-surface-soft flex items-center justify-center shrink-0 text-brand">
-                      <item.icon size={14} />
-                    </div>
-                    {item.label}
-                  </div>
-                ))}
+            <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
+              <Truck size={17} className="shrink-0 text-brand" />
+              <div>
+                <p className="text-xs font-semibold text-text">Tracked delivery</p>
+                <p className="text-[11px] text-text-muted">Follow your order live</p>
               </div>
             </div>
           </div>
 
-          <div className="space-y-8">
-            <div className="flex flex-col sm:flex-row items-center gap-6">
-              <div className="flex items-center bg-surface-soft rounded-2xl p-1 border-2 border-transparent focus-within:border-brand/30 transition-all h-16">
+          {/* Purchase */}
+          {!canPurchase ? (
+            <div className="flex items-start gap-2.5 rounded-xl border border-brand/20 bg-brand-light px-3.5 py-3 text-xs text-brand">
+              <Store size={16} className="mt-0.5 shrink-0" />
+              You are signed in with a {String(user?.role || "").replace(/_/g, " ")} account. Buying is available on customer accounts.
+            </div>
+          ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 items-center rounded-xl border border-border bg-surface">
                 <button
-                  onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                  className="w-14 h-full flex items-center justify-center text-text-muted hover:text-brand transition-all active:scale-90"
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  className="flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:text-brand"
+                  aria-label="Decrease quantity"
                 >
-                  <Minus size={20} />
+                  <Minus size={16} />
                 </button>
-                <div className="w-14 text-center font-display font-black text-2xl text-text">{quantity}</div>
+                <span className="w-9 text-center font-display text-base font-semibold text-text">{quantity}</span>
                 <button
-                  onClick={() => setQuantity(q => Math.min(product.stock || 100, q + 1))}
-                  className="w-14 h-full flex items-center justify-center text-text-muted hover:text-brand transition-all active:scale-90"
+                  onClick={() => setQuantity((q) => Math.min(product.stock || 99, q + 1))}
+                  className="flex h-full w-10 items-center justify-center text-text-muted transition-colors hover:text-brand"
+                  aria-label="Increase quantity"
                 >
-                  <Plus size={20} />
+                  <Plus size={16} />
                 </button>
               </div>
+              <Button
+                className="flex-1"
+                disabled={outOfStock}
+                onClick={handleCheckout}
+                icon={<PackageCheck size={17} />}
+              >
+                Checkout
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={outOfStock}
+                onClick={handleAddToCart}
+                icon={<ShoppingBag size={17} />}
+              >
+                Add to cart
+              </Button>
+            </div>
+            {outOfStock ? (
+              <p className="text-xs font-medium text-danger">This product is currently out of stock.</p>
+            ) : null}
+          </div>
+          )}
 
-              <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <button
-                  className="btn-primary !h-16 shadow-brand/40 text-sm active:scale-95"
-                  disabled={submitting || !product.stock || product.stock <= 0}
-                  onClick={handleOrder}
-                >
-                  {submitting ? "Syncing..." : "Checkout Order"}
-                </button>
-                <button
-                  className="h-16 bg-dark-bg text-white font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-brand transition-all active:scale-95 shadow-xl disabled:opacity-50 inline-flex items-center justify-center gap-2"
-                  disabled={!product.stock || product.stock <= 0}
-                  onClick={() => {
-                    addToCart({
-                      id: product.id,
-                      name: product.name || "Product",
-                      price: product.price || 0,
-                      image_url: product.image_url,
-                      seller_id: product.seller_id,
-                      seller_name: product.seller_name || null,
-                    });
-                    toast(`Added "${product.name || 'Item'}" to your cart.`, "success");
-                    setIsOpen(true);
-                  }}
-                >
-                  <ShoppingBag size={18} />
-                  Add to Cart
-                </button>
+          {/* Seller */}
+          <div className="rounded-[1.25rem] border border-border bg-surface p-4 shadow-soft">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-light font-display text-base font-bold text-brand">
+                {sellerName.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-text">{sellerName}</p>
+                <p className="flex items-center gap-1 text-[11px] text-text-muted">
+                  {verified ? <><CheckCircle2 size={11} className="text-success" /> Verified merchant</> : "Marketplace merchant"}
+                </p>
               </div>
             </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-8 py-4 opacity-40">
-              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em]">
-                <ShieldCheck size={14} /> Global Escrow
-              </div>
-              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em]">
-                <Truck size={14} /> Smart Routing
-              </div>
-              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em]">
-                <Zap size={14} /> Instant Settlement
-              </div>
-            </div>
+            {product.seller?.region || product.seller?.area ? (
+              <p className="mt-3 flex items-center gap-1.5 border-t border-border pt-3 text-[11px] text-text-muted">
+                <Store size={12} /> {[product.seller?.area, product.seller?.region].filter(Boolean).join(", ")}
+              </p>
+            ) : null}
           </div>
         </div>
       </div>
 
-      {/* Similar Products Section */}
-      <section id="similar-products" className="pt-20 space-y-12 border-t border-border">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-border pb-8">
-          <div className="space-y-2">
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-brand">Recommendations</span>
-            <h2 className="text-3xl font-display font-black text-text tracking-tight">Similar Product Assets</h2>
+      {/* Similar */}
+      <section className="space-y-4 border-t border-border pt-8">
+        <div className="flex items-end justify-between">
+          <div>
+            <span className="eyebrow">You may also like</span>
+            <h2 className="section-title mt-1.5">Similar products</h2>
           </div>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-          {similarProducts.map((p) => (
-            <motion.article
-              key={p.id}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="group glass-card overflow-hidden hover:-translate-y-2 flex flex-col h-full cursor-pointer"
-              onClick={() => {
-                navigate(`/product/${p.id}`);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-            >
-              <div className="relative aspect-[4/5] overflow-hidden bg-surface-soft">
-                <img
-                  src={resolveImageUrl(p.image_url)}
-                  alt={p.name}
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                  loading="lazy"
-                />
-              </div>
-
-              <div className="p-6 flex flex-col flex-1 space-y-4">
-                <div className="space-y-1">
-                  <h3 className="font-display font-black text-base text-text leading-tight group-hover:text-brand transition-colors line-clamp-2">
-                    {p.name}
-                  </h3>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-text-muted">{p.category}</p>
-                </div>
-
-                <div className="mt-auto pt-4 border-t border-border">
-                  <span className="text-lg font-display font-black text-text tracking-tight">{formatMoney(p.price)}</span>
-                </div>
-              </div>
-            </motion.article>
-          ))}
-          {similarProducts.length === 0 && (
-            <p className="text-sm font-medium text-text-muted col-span-full py-12 text-center">No similar products found at this time.</p>
-          )}
-        </div>
+        {similarProducts.length ? (
+          <div className="grid grid-cols-2 gap-4 sm:gap-5 lg:grid-cols-4">
+            {similarProducts.map((p) => (
+              <ProductCard
+                key={p.id}
+                product={p}
+                onOpen={() => {
+                  navigate(`/product/${p.id}`);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-xl border border-dashed border-border bg-surface-soft/50 py-8 text-center text-sm text-text-muted">
+            No similar products at the moment.
+          </p>
+        )}
       </section>
 
-      {/* Enhanced Lightbox Overlay */}
       <Modal isOpen={showLightbox} onClose={() => setShowLightbox(false)} title={product.name}>
-        <div className="space-y-8 p-4">
-          <div
-            className={`relative overflow-hidden rounded-[2.5rem] bg-surface-soft cursor-crosshair group ${zoom ? 'h-[75vh]' : 'h-auto'}`}
-            onMouseEnter={() => setZoom(true)}
-            onMouseLeave={() => setZoom(false)}
-            onMouseMove={handleImageMouseMove}
-          >
-            <img
-              src={imageUrl}
-              alt={product.name}
-              className={`w-full h-full object-contain transition-transform duration-200 ${zoom ? 'scale-[2.5]' : 'scale-100'}`}
-              style={zoom ? { transformOrigin: `${mousePosition.x}% ${mousePosition.y}%` } : undefined}
-            />
-            {!zoom && (
-              <div className="absolute inset-0 flex items-center justify-center bg-dark-bg/5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="px-6 py-3 bg-white text-dark-bg rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl">Precision Zoom Enabled</span>
-              </div>
-            )}
+        <div className="space-y-3">
+          <div className="overflow-hidden rounded-xl bg-surface-soft">
+            <img src={imageUrl} alt={product.name} className="max-h-[70vh] w-full object-contain" />
           </div>
-          <div className="flex justify-between items-center px-6">
-            <div className="space-y-1">
-              <h4 className="font-display font-black text-text uppercase tracking-tight">{product.name}</h4>
-              <p className="text-[10px] font-black text-text-muted uppercase tracking-widest">High-Definition Asset Preview</p>
-            </div>
-            <button onClick={() => setShowLightbox(false)} className="btn-secondary !h-12 !px-8">Close View</button>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-text-muted">{product.category || "Product"}</p>
+            <Button variant="secondary" size="sm" onClick={() => setShowLightbox(false)}>
+              Close
+            </Button>
           </div>
         </div>
       </Modal>
-    </motion.div>
+    </div>
+  );
+
+  if (isInsideApp) {
+    return <div className="py-4">{content}</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-bg text-text">
+      <header className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          <Link to="/" className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand p-1.5 shadow-sm">
+              <img src={logoUrl} alt="Soko-Link" className="h-full w-full object-contain" />
+            </span>
+            <span className="font-display text-lg font-bold tracking-tight text-text">Soko-Link</span>
+          </Link>
+          <div className="flex items-center gap-2">
+            {user ? (
+              <Link to={getPostLoginPath(user)} className="btn-primary btn-sm">
+                Workspace <ArrowRight size={14} />
+              </Link>
+            ) : (
+              <>
+                <Link to="/login" className="btn-ghost btn-sm">Sign in</Link>
+                <Link to="/register/customer" className="btn-primary btn-sm">Create account</Link>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+      <main className="px-4 py-8 sm:px-6 lg:px-8">{content}</main>
+    </div>
   );
 }

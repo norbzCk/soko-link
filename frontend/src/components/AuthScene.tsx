@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { BrandMark } from "./BrandMark";
-import { CheckCircle2, ArrowLeft } from "lucide-react";
+import logoUrl from "../assets/sokolink-logo.png";
+import { ArrowLeft, CheckCircle2, ShieldCheck } from "lucide-react";
 
 export function AuthScene({
   eyebrow,
@@ -20,126 +21,103 @@ export function AuthScene({
   children: ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center p-4 md:p-8 selection:bg-brand/20 relative overflow-hidden">
-      {/* Background Decorative Elements */}
-      <div className="absolute top-0 right-0 w-1/2 h-full bg-surface-soft/30 -z-10 skew-x-[-12deg] translate-x-1/4" />
-      
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-bg p-3 selection:bg-brand/20 sm:p-6 lg:p-8">
+      <div className="pointer-events-none absolute -left-40 top-0 h-96 w-96 rounded-full bg-brand/10 blur-[130px]" />
+      <div className="pointer-events-none absolute -bottom-40 right-0 h-96 w-96 rounded-full bg-accent/10 blur-[130px]" />
+
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
-        className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-2 bg-surface rounded-[2.5rem] shadow-premium overflow-hidden border border-border"
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className="relative z-10 grid w-full max-w-5xl overflow-hidden rounded-[1.5rem] border border-border bg-surface shadow-premium lg:grid-cols-[0.92fr_1.08fr]"
       >
-        {/* Left Side: Branded Content */}
-        <aside className="relative hidden lg:flex flex-col p-12 xl:p-16 overflow-hidden">
-          <div className="absolute inset-0 bg-dark-bg" />
-          <div className="absolute inset-0 opacity-30">
-            <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-brand/30 blur-[120px]" />
-            <div className="absolute -bottom-20 -right-20 h-80 w-80 rounded-full bg-accent/20 blur-[120px]" />
+        {/* Brand panel */}
+        <aside className="relative hidden overflow-hidden bg-[#08192b] p-9 lg:flex lg:flex-col xl:p-11">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -left-16 -top-16 h-72 w-72 rounded-full bg-brand/30 blur-[110px]" />
+            <div className="absolute -bottom-20 -right-16 h-72 w-72 rounded-full bg-accent/20 blur-[110px]" />
+            <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(255,255,255,.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.6)_1px,transparent_1px)] [background-size:36px_36px]" />
           </div>
-          
-          <div className="relative z-10 flex flex-col h-full">
-            <BrandMark subtitle="Commerce Orchestration" />
-            
-            <motion.div 
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.3, duration: 0.5 }}
-              className="mt-20 space-y-6"
-            >
-              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-white text-[10px] font-black uppercase tracking-widest border border-white/10">
-                <span className="h-1 w-1 rounded-full bg-brand animate-pulse" />
+
+          <div className="relative z-10 flex h-full flex-col">
+            <Link to="/" className="inline-flex w-fit items-center gap-2.5 text-white">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 p-1.5 ring-1 ring-white/15">
+                <img src={logoUrl} alt="" className="h-full w-full object-contain" />
+              </span>
+              <span className="font-display text-lg font-bold tracking-tight">Soko-Link</span>
+            </Link>
+
+            <div className="mt-14">
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/80">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                 {eyebrow}
               </span>
-              <h1 className="text-4xl xl:text-6xl font-display font-black text-white leading-[1.1] tracking-tight">
+              <h1 className="mt-4 max-w-sm font-display text-[2rem] font-bold leading-[1.15] tracking-tight text-white xl:text-[2.4rem]">
                 {title}
               </h1>
-              <p className="text-white/60 text-lg font-medium leading-relaxed max-w-md">
-                {description}
-              </p>
-            </motion.div>
+              <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/60">{description}</p>
+            </div>
 
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5, duration: 0.5 }}
-              className="mt-16 space-y-6"
-            >
-              <h2 className="text-white/30 font-black text-xs uppercase tracking-[0.2em]">Platform Edge</h2>
-              <ul className="grid gap-5">
-                {bullets.map((item, i) => (
-                  <motion.li 
-                    key={item}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.6 + (i * 0.1) }}
-                    className="flex items-center gap-4 text-white/90 font-bold group cursor-default"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center shrink-0 border border-white/10 group-hover:bg-brand/20 group-hover:border-brand/40 transition-all">
-                      <CheckCircle2 size={20} className="text-brand" />
-                    </div>
-                    <span className="text-sm xl:text-base">{item}</span>
-                  </motion.li>
-                ))}
-              </ul>
-            </motion.div>
-
-            <div className="mt-auto pt-12 flex flex-wrap gap-8 border-t border-white/10">
-              {links.map((item) => (
-                <Link 
-                  key={item.to} 
-                  to={item.to}
-                  className="text-[10px] font-black uppercase tracking-[0.2em] text-white/30 hover:text-white transition-colors flex items-center gap-2 group"
+            <ul className="mt-8 space-y-3">
+              {bullets.map((item, index) => (
+                <motion.li
+                  key={item}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.15 + index * 0.08 }}
+                  className="flex items-start gap-2.5 text-sm font-medium text-white/80"
                 >
-                  {item.label}
-                  <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-all -translate-x-2 group-hover:translate-x-0" />
-                </Link>
+                  <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-brand" />
+                  <span>{item}</span>
+                </motion.li>
               ))}
+            </ul>
+
+            <div className="mt-auto pt-10">
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-medium text-white/55">
+                <ShieldCheck size={15} className="text-brand" />
+                Secured sessions · encrypted credentials · role-based access
+              </div>
+              <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t border-white/10 pt-4">
+                {links.map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35 transition-colors hover:text-white"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
             </div>
           </div>
         </aside>
 
-        {/* Right Side: Auth Form */}
-        <div className="p-8 md:p-16 lg:p-20 flex flex-col justify-center bg-surface">
-          <div className="lg:hidden mb-12 flex items-center justify-between">
-            <Link to="/" className="flex items-center gap-2 text-text-muted font-bold text-sm">
-              <ArrowLeft size={16} />
+        {/* Form panel */}
+        <div className="flex flex-col bg-surface">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4 lg:hidden">
+            <BrandMark subtitle="" />
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-text-muted transition-colors hover:bg-surface-soft hover:text-text"
+            >
+              <ArrowLeft size={14} />
               Home
             </Link>
-            <div className="h-10 w-10 bg-brand rounded-xl flex items-center justify-center shadow-lg">
-              <BrandMark subtitle="" />
-            </div>
           </div>
-          
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="max-w-md mx-auto w-full"
-          >
-            {children}
-          </motion.div>
+
+          <div className="flex flex-1 items-start justify-center px-5 py-8 sm:px-8 sm:py-10 lg:px-11 lg:py-12">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.4 }}
+              className="w-full max-w-md"
+            >
+              {children}
+            </motion.div>
+          </div>
         </div>
       </motion.div>
     </div>
-  );
-}
-
-function ChevronRight({ size, className }: { size: number, className: string }) {
-  return (
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      width={size} 
-      height={size} 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
-      className={className}
-    >
-      <path d="m9 18 6-6-6-6"/>
-    </svg>
   );
 }

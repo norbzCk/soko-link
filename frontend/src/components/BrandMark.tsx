@@ -3,14 +3,16 @@ import logoUrl from "../assets/sokolink-logo.png";
 
 export function BrandMark({ to = "/", subtitle = "Smart marketplace operations" }: { to?: string; subtitle?: string }) {
   return (
-    <Link to={to} className="flex items-center gap-3 transition-all duration-300 hover:scale-105 hover:gap-4 group">
-      <div className="w-10 h-10 rounded-full bg-brand flex items-center justify-center p-1.5 shadow-lg group-hover:shadow-xl group-hover:shadow-brand/20 transition-all duration-300 group-hover:rotate-12">
-        <img className="w-full h-full object-contain rounded-full" src={logoUrl} alt="Soko-Link" />
-      </div>
-      <div className="flex flex-col">
-        <span className="font-display font-extrabold text-lg tracking-tight leading-tight text-slate-900 dark:text-white group-hover:text-brand transition-colors duration-300">Soko-Link</span>
-        {subtitle ? <span className="text-[10px] uppercase tracking-widest font-bold text-brand group-hover:text-brand-strong transition-colors duration-300">{subtitle}</span> : null}
-      </div>
+    <Link to={to} className="group flex items-center gap-2.5">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand p-1.5 shadow-sm transition-transform duration-300 group-hover:-rotate-3">
+        <img className="h-full w-full object-contain" src={logoUrl} alt="Soko-Link" />
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate font-display text-base font-bold leading-tight tracking-tight text-text">Soko-Link</span>
+        {subtitle ? (
+          <span className="truncate text-[9px] font-semibold uppercase tracking-[0.16em] text-brand">{subtitle}</span>
+        ) : null}
+      </span>
     </Link>
   );
 }

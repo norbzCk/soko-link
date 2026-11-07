@@ -1,6 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
-import { CartProvider } from "../features/auth/CartContext";
 import { ProtectedRoute, RoleRoute } from "../features/auth/ProtectedRoute";
 import { AppShell } from "../features/layout/AppShell";
 import { AdminDashboardPage } from "../pages/AdminDashboardPage";
@@ -66,9 +65,7 @@ export function App() {
         path="/app"
         element={
           <ProtectedRoute>
-            <CartProvider>
-              <AppShell />
-            </CartProvider>
+            <AppShell />
           </ProtectedRoute>
         }
       >
