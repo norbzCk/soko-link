@@ -1,5 +1,10 @@
 # Development Workflow
 
+> **Authoritative contributor rules live in
+> [CONTRIBUTING.md](../../CONTRIBUTING.md).** This page covers local setup and
+> day-to-day commands; it does not replace the baseline-first workflow,
+> verification requirements, or review checklist.
+
 ## Prerequisites
 
 - Python 3.11+

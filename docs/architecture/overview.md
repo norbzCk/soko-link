@@ -1,5 +1,10 @@
 # SokoLink Architecture
 
+> **Start here for contribution rules:** [Architecture.md](../../Architecture.md)
+> is the current verified baseline and [CONTRIBUTING.md](../../CONTRIBUTING.md)
+> defines the required workflow. This page provides the detailed repository and
+> request-flow view.
+
 SokoLink is a **microservice-ready modular monorepo**. The backend currently
 ships as one FastAPI gateway, but every business capability lives in its own
 service package with an explicit router boundary. This keeps local development

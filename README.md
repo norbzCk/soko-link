@@ -7,6 +7,22 @@ deliver, and superadmins operate the marketplace.
 The repository is a **microservice-ready modular monorepo**: one FastAPI gateway
 today, with separate service packages for each business capability.
 
+## Project baselines
+
+Contributors must start from the current implementation, not rebuild it:
+
+- [Architecture.md](Architecture.md) — verified system structure, service
+  ownership, API contracts, and integration status.
+- [PRD-Statement.md](PRD-Statement.md) — product scope, current capability
+  baseline, business rules, and change control.
+- [Design.md](Design.md) — approved design tokens, shared components, and
+  design quality gates.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — required workflow, verification
+  commands, and review checklist.
+
+See [docs/architecture/overview.md](docs/architecture/overview.md) for the
+detailed repository and request-flow documentation.
+
 ## Repository layout
 
 ```text
@@ -141,8 +157,11 @@ opening a pull request.
 
 Key rules:
 
+- Extend the current baseline; do not re-platform, reorganise, or redesign
+  working modules.
 - Add feature endpoints to the owning service under `backend/services/`.
 - Keep `backend/api/main.py` limited to app wiring and gateway endpoints.
 - Keep public API paths stable during refactors.
+- Reuse the shared UI primitives and design tokens in `frontend/`.
 - Add regression tests for business-rule changes.
 - Never commit `.env`, credentials or generated databases.
