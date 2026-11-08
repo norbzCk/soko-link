@@ -171,7 +171,7 @@ mean the capability has been production-verified.
 
 | Capability | Status | Current scope / limitation |
 | --- | --- | --- |
-| Identity and accounts | Implemented | Registration, login, refresh-token rotation, email verification, phone OTP, password recovery, account status. |
+| Identity and accounts | Implemented | Registration, login, refresh-token rotation, email OTP/link verification, phone OTP, password recovery, account status. |
 | Roles and applications | Implemented | Customer, seller, logistics, admin, superadmin, analyst; role applications and admin approval. |
 | Seller onboarding | Implemented | Business registration, profile, logo/photo upload, verification/approval state. |
 | Marketplace catalogue | Implemented | Public and authenticated product feeds, search, category filter, sort, product detail. |
@@ -420,9 +420,9 @@ and approval status. Do not silently introduce new commercial policies.
 1.  **Customer purchase:** discover → inspect product → add to cart →
     review checkout → place order → complete payment flow → receive
     confirmed order status → follow fulfilment.
-2.  **Seller onboarding:** register → verify identity/contact → submit
-    business information → await approval if required → access seller
-    workspace → publish listing.
+2.  **Seller onboarding:** register → verify email with a 6-digit code →
+    await approval if required → access seller workspace → publish
+    listing.
 3.  **Seller fulfilment:** receive order → review → process according to
     approved workflow → coordinate delivery → complete eligible actions.
 4.  **Logistics fulfilment:** access assigned delivery → review shipment

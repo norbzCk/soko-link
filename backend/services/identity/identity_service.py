@@ -183,6 +183,65 @@ def consume_verification_token(
     return record
 
 
+def consume_identity_otp(
+    db: Session,
+    identity_id: int,
+    raw_token: str,
+    *,
+    purpose: str,
+    channel: str = "email",
+    max_attempts: int = 5,
+) -> VerificationToken | None:
+    if not raw_token:
+        return None
+    record = (
+        db.query(VerificationToken)
+        .filter(
+            VerificationToken.identity_id == identity_id,
+            VerificationToken.purpose == purpose,
+            VerificationToken.channel == channel,
+            VerificationToken.used_at.is_(None),
+        )
+        .order_by(VerificationToken.created_at.desc(), VerificationToken.id.desc())
+        .first()
+    )
+    if not record:
+        return None
+    now = utcnow()
+    expires_at = as_utc(record.expires_at)
+    if expires_at is None or expires_at <= now:
+        record.used_at = now
+        return None
+    attempts = int(record.attempts or 0)
+    if attempts >= max_attempts:
+        record.used_at = now
+        return None
+    record.attempts = attempts + 1
+    if not secrets.compare_digest(record.token_hash, hash_token(raw_token)):
+        if record.attempts >= max_attempts:
+            record.used_at = now
+        return None
+    record.used_at = now
+    return record
+
+
+def invalidate_verification_tokens(
+    db: Session,
+    identity_id: int,
+    *,
+    purposes: set[str] | list[str] | tuple[str, ...],
+    channel: str | None = None,
+) -> int:
+    query = db.query(VerificationToken).filter(
+        VerificationToken.identity_id == identity_id,
+        VerificationToken.purpose.in_(list(purposes)),
+        VerificationToken.used_at.is_(None),
+    )
+    if channel:
+        query = query.filter(VerificationToken.channel == channel)
+    return query.update({VerificationToken.used_at: utcnow()}, synchronize_session=False)
+
+
 def ensure_role(
     db: Session,
     identity_id: int,

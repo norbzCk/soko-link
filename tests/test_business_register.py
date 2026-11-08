@@ -92,6 +92,25 @@ class TestBusinessRegister:
         stray_customer = db.query(User).filter(User.phone == "+255712345678").first()
         assert stray_customer is None
 
+    def test_register_email_otp_verifies_before_approval(self, client, db, caplog):
+        response = client.post("/business/register", data={**VALID_PAYLOAD, "email": "otp-seller@example.com"})
+        assert response.status_code == 200
+        matches = re.findall(r"email verification OTP for \S+ is (\d{6})", caplog.text)
+        assert matches
+
+        verified = client.post("/auth/verify-email-otp", json={
+            "email": "otp-seller@example.com",
+            "otp": matches[-1],
+        })
+        assert verified.status_code == 200
+
+        pending = client.post("/auth/login", json={
+            "email": "otp-seller@example.com",
+            "password": "SecurePass1!",
+        })
+        assert pending.status_code == 403
+        assert "approval" in pending.json()["detail"].lower()
+
     def test_register_with_logo_upload(self, client, db):
         fake_png = b"\x89PNG\r\n\x1a\n" + b"0" * 100
         files = {"logo": ("logo.png", io.BytesIO(fake_png), "image/png")}

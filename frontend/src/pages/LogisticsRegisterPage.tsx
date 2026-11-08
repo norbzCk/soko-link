@@ -45,6 +45,7 @@ export function LogisticsRegisterPage() {
     }
     form.delete("confirm_password");
     form.delete("terms");
+    const email = String(form.get("email") || "");
 
     try {
       await apiRequest("/logistics/register", {
@@ -52,7 +53,9 @@ export function LogisticsRegisterPage() {
         body: form,
         auth: false,
       });
-      navigate("/login?registered=logistics", { replace: true });
+      navigate(`/verify-otp?${new URLSearchParams({ email, registered: "logistics" }).toString()}`, {
+        replace: true,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
       setIsSubmitting(false);

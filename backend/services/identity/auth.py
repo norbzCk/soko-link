@@ -55,10 +55,12 @@ from backend.services.identity.identity_service import (
     approved_role_names,
     as_utc,
     canonical_role,
+    consume_identity_otp,
     consume_verification_token,
     default_profile,
     ensure_identity_for_profile,
     ensure_role,
+    invalidate_verification_tokens,
     issue_verification_token,
     legacy_role,
     new_otp,
@@ -78,6 +80,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 PASSWORD_RESET_TTL_SECONDS = 60 * 30
 EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60 * 24
+EMAIL_VERIFICATION_OTP_PURPOSE = "email_verification_otp"
+REGISTRATION_OTP_TTL_SECONDS = 60 * 10
+EMAIL_OTP_MAX_ATTEMPTS = 5
 PHONE_OTP_TTL_SECONDS = 60 * 10
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
@@ -418,11 +423,22 @@ def _send_email_verification(
         channel="email",
         ttl_seconds=EMAIL_VERIFICATION_TTL_SECONDS,
     )
+    otp = new_otp()
+    issue_verification_token(
+        db,
+        identity.id,
+        purpose=EMAIL_VERIFICATION_OTP_PURPOSE,
+        channel="email",
+        ttl_seconds=REGISTRATION_OTP_TTL_SECONDS,
+        raw_token=otp,
+    )
     url = _identity_url("/verify-email", raw)
     body = (
         f"Hello {identity.name},\n\n"
         "Confirm your email address to activate your SokoLink account.\n\n"
-        f"Verify email: {url}\n\n"
+        f"Your verification code is {otp}. Enter it on the verification page.\n"
+        f"This code expires in {REGISTRATION_OTP_TTL_SECONDS // 60} minutes.\n\n"
+        f"Or verify with this link: {url}\n\n"
         "This link expires in 24 hours. If you did not create an account, ignore this message.\n\n"
         "SokoLink Security"
     )
@@ -439,6 +455,7 @@ def _send_email_verification(
     )
     if not smtp_enabled() and not IS_PRODUCTION:
         logger.warning("SMTP is not configured; email verification link for %s: %s", identity.email, url)
+        logger.warning("SMTP is not configured; email verification OTP for %s is %s", identity.email, otp)
     return raw
 
 
@@ -1423,6 +1440,12 @@ def verify_email(payload: dict, db: Session = Depends(get_db)):
                 if profile.account_status == STATUS_PENDING_VERIFICATION:
                     profile.account_status = identity.status
                 db.add(profile)
+        invalidate_verification_tokens(
+            db,
+            identity.id,
+            purposes={"email_verification", EMAIL_VERIFICATION_OTP_PURPOSE},
+            channel="email",
+        )
         audit(
             db,
             actor_type="identity",
@@ -1448,6 +1471,64 @@ def verify_email(payload: dict, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     return {"message": "Email verified successfully"}
+
+
+@router.post("/verify-email-otp")
+@limiter.limit("10/minute")
+def verify_email_otp(request: Request, payload: dict, db: Session = Depends(get_db)):
+    email = _normalize_email(payload.get("email"))
+    otp = str(payload.get("otp") or payload.get("token") or "").strip()
+    invalid = HTTPException(status_code=400, detail="Invalid or expired verification code")
+    if not email or not re.fullmatch(r"\d{6}", otp):
+        raise invalid
+
+    identity = db.query(Identity).filter(func.lower(Identity.email) == email).first()
+    if not identity or identity.email_verified or identity.status in {STATUS_SUSPENDED, STATUS_DISABLED}:
+        raise invalid
+
+    record = consume_identity_otp(
+        db,
+        identity.id,
+        otp,
+        purpose=EMAIL_VERIFICATION_OTP_PURPOSE,
+        channel="email",
+        max_attempts=EMAIL_OTP_MAX_ATTEMPTS,
+    )
+    if not record:
+        db.commit()
+        raise invalid
+
+    identity.email_verified = True
+    if identity.status == STATUS_PENDING_VERIFICATION:
+        identity.status = STATUS_ACTIVE
+    db.add(identity)
+    for model in (User, BusinessUser, LogisticsUser):
+        for profile in db.query(model).filter(model.identity_id == identity.id).all():
+            profile.is_verified = True
+            profile.verification_token = None
+            if profile.account_status == STATUS_PENDING_VERIFICATION:
+                profile.account_status = identity.status
+            db.add(profile)
+    invalidate_verification_tokens(
+        db,
+        identity.id,
+        purposes={"email_verification", EMAIL_VERIFICATION_OTP_PURPOSE},
+        channel="email",
+    )
+    audit(
+        db,
+        actor_type="identity",
+        actor_id=identity.id,
+        entity_type="identity",
+        entity_id=identity.id,
+        action="email_otp_verified",
+    )
+    db.commit()
+    return {
+        "message": "Email verified successfully",
+        "status": identity.status,
+        "email_verified": True,
+    }
 
 
 @router.post("/verify-email/resend")

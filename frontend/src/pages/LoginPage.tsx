@@ -13,10 +13,11 @@ export function LoginPage() {
   const [searchParams] = useSearchParams();
   const registeredAs = searchParams.get("registered");
   const verifyFirst = searchParams.get("verify") === "1";
+  const justVerified = searchParams.get("verified") === "1";
   const welcomeMessages: Record<string, string> = {
-    seller: "Your business account was created. Check your email to verify it, then wait for administrator approval before signing in.",
-    customer: "Your account was created. Check your email and click the verification link before signing in.",
-    logistics: "Your logistics account was created. Check your email to verify it, then wait for administrator approval before signing in.",
+    seller: "Your business account was created. Check your email for a 6-digit code, then wait for administrator approval before signing in.",
+    customer: "Your account was created. Check your email for a 6-digit code to activate it.",
+    logistics: "Your logistics account was created. Check your email for a 6-digit code, then wait for administrator approval before signing in.",
   };
   const { login } = useAuth();
   const [error, setError] = useState("");
@@ -65,7 +66,17 @@ export function LoginPage() {
           <p className="mt-1 text-sm text-text-muted">Welcome back to Soko-Link.</p>
         </div>
 
-        {registeredAs && welcomeMessages[registeredAs] ? (
+        {justVerified ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-success/25 bg-success/10 px-3.5 py-2.5 text-xs font-medium leading-relaxed text-success">
+            <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+            <span>
+              Email verified. Sign in to continue.
+              {registeredAs === "seller" || registeredAs === "logistics"
+                ? " Your application still needs administrator approval before dashboard access."
+                : ""}
+            </span>
+          </div>
+        ) : registeredAs && welcomeMessages[registeredAs] ? (
           <div
             className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs font-medium leading-relaxed ${
               verifyFirst
@@ -77,7 +88,9 @@ export function LoginPage() {
             <span>
               {verifyFirst ? "One more step. " : "Welcome to Soko-Link! "}
               {welcomeMessages[registeredAs]}{" "}
-              <Link to="/verify-email" className="underline underline-offset-2">Resend verification email</Link>.
+              <Link to="/verify-otp" className="underline underline-offset-2">Enter verification code</Link>{" "}
+              or{" "}
+              <Link to="/verify-email" className="underline underline-offset-2">resend verification email</Link>.
             </span>
           </div>
         ) : null}

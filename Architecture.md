@@ -107,7 +107,7 @@ deployment and integration details.
 | Database | SQLite for local development/tests; PostgreSQL target for deployment; migrations in `alembic/` | Implemented locally; production unverified |
 | Containers | `Dockerfile.backend`, `Dockerfile.frontend`, `docker-compose.yml`, `Caddyfile` | Present; runtime/deployment unverified |
 | Hosting config | `render.yaml`, `railway.toml`, `netlify.toml`, GitHub Pages workflow | Present; live state unverified |
-| Identity | JWT access/refresh cookies, refresh rotation, hashed verification/reset tokens, email verification, phone OTP, role applications, optional Supabase bridge | Implemented |
+| Identity | JWT access/refresh cookies, refresh rotation, hashed verification/reset tokens, registration email OTP and link verification, phone OTP, role applications, optional Supabase bridge | Implemented |
 | Payments | M-Pesa, Airtel Money and Tigo Pesa adapters with webhook/poll handling; manual bank transfer and cash-on-delivery flows | Partially implemented --- provider production verification pending |
 | Uploads | Images stored as base64 data URIs in database columns via `backend/shared/utils/uploads.py`; 2 MB raw limit | Implemented |
 | AI assistant | Gemini first, OpenAI fallback, rule-based fallback when providers are unavailable | Implemented; external provider availability unverified |
@@ -333,6 +333,14 @@ model, and insecure file uploads. - Configure CORS for explicit trusted
 origins. - Redact credentials, tokens, and sensitive personal/payment
 data from logs. - Maintain security and administrative audit records.
 
+Registration email verification supports a 6-digit OTP challenge in
+addition to the single-use link. Registration OTPs are generated with a
+cryptographic random source, stored only as hashes, expire after 10
+minutes, are single-use, are replaced on resend, and lock after five
+failed attempts. Verification responses are deliberately generic, codes
+are never placed in URLs or API responses, and the development-only log
+fallback is disabled in production.
+
 Do not infer security quality from the presence of a JWT library or a
 role field alone.
 
@@ -551,8 +559,8 @@ Verified in this baseline:
 - [x] Database and migration configuration confirmed (SQLite dev/test,
       PostgreSQL production target, Alembic).
 - [x] Public API prefixes and frontend route map confirmed.
-- [x] Authentication, refresh-token rotation, email verification, phone
-      OTP, and role-application flows located in source.
+- [x] Authentication, refresh-token rotation, email OTP/link verification,
+      phone OTP, and role-application flows located in source.
 - [x] Payment methods and their implementation status inventoried.
 - [x] Image upload path and size/type rules confirmed.
 - [x] Backend regression test suite and frontend build commands confirmed.

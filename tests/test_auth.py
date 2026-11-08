@@ -5,7 +5,15 @@ from sqlalchemy.orm import Session
 from backend.api.main import app
 from backend.shared.database import SessionLocal, engine
 from backend.shared.models import Base
-from backend.shared.models import User, BusinessUser, LogisticsUser, RefreshToken, TokenBlocklist
+from backend.shared.models import (
+    BusinessUser,
+    Identity,
+    LogisticsUser,
+    RefreshToken,
+    TokenBlocklist,
+    User,
+    VerificationToken,
+)
 from backend.services.identity.auth import hash_password, create_access_token, create_refresh_token
 from datetime import datetime, timedelta, timezone
 
@@ -91,6 +99,12 @@ def extract_verification_token(log_text: str) -> str:
     match = re.search(r"verify-email\?token=([^\s]+)", log_text)
     assert match, f"verification link not found in logs: {log_text}"
     return match.group(1)
+
+
+def extract_email_otp(log_text: str) -> str:
+    matches = re.findall(r"email verification OTP for \S+ is (\d{6})", log_text)
+    assert matches, f"email verification OTP not found in logs: {log_text}"
+    return matches[-1]
 
 
 class TestRegister:
@@ -194,6 +208,132 @@ class TestRegister:
             "password": "TestPass1!",
         })
         assert response.status_code == 400
+
+
+class TestRegistrationOtp:
+    def test_registration_otp_verifies_account_and_is_single_use(self, client, db, caplog):
+        register = client.post("/auth/register", json={
+            "name": "OTP User",
+            "email": "otpuser@example.com",
+            "phone": "+255700000400",
+            "password": "TestPass1!",
+        })
+        assert register.status_code == 200
+        otp = extract_email_otp(caplog.text)
+
+        verified = client.post("/auth/verify-email-otp", json={
+            "email": "otpuser@example.com",
+            "otp": otp,
+        })
+        assert verified.status_code == 200
+        assert verified.json()["status"] == "ACTIVE"
+        assert verified.json()["email_verified"] is True
+
+        reused = client.post("/auth/verify-email-otp", json={
+            "email": "otpuser@example.com",
+            "otp": otp,
+        })
+        assert reused.status_code == 400
+
+        login = client.post("/auth/login", json={
+            "email": "otpuser@example.com",
+            "password": "TestPass1!",
+        })
+        assert login.status_code == 200
+
+    def test_registration_otp_locks_after_too_many_wrong_attempts(self, client, db, caplog):
+        register = client.post("/auth/register", json={
+            "name": "Locked OTP User",
+            "email": "lockedotp@example.com",
+            "phone": "+255700000401",
+            "password": "TestPass1!",
+        })
+        assert register.status_code == 200
+        otp = extract_email_otp(caplog.text)
+        wrong_otp = f"{(int(otp) + 1) % 1_000_000:06d}"
+
+        for _ in range(5):
+            attempt = client.post("/auth/verify-email-otp", json={
+                "email": "lockedotp@example.com",
+                "otp": wrong_otp,
+            })
+            assert attempt.status_code == 400
+
+        locked = client.post("/auth/verify-email-otp", json={
+            "email": "lockedotp@example.com",
+            "otp": otp,
+        })
+        assert locked.status_code == 400
+
+    def test_resend_otp_invalidates_previous_code(self, client, db, caplog):
+        register = client.post("/auth/register", json={
+            "name": "Resend OTP User",
+            "email": "resendotp@example.com",
+            "phone": "+255700000402",
+            "password": "TestPass1!",
+        })
+        assert register.status_code == 200
+        previous_otp = extract_email_otp(caplog.text)
+
+        caplog.clear()
+        resent = client.post("/auth/verify-email/resend", json={"email": "resendotp@example.com"})
+        assert resent.status_code == 200
+        new_otp = extract_email_otp(caplog.text)
+
+        old_attempt = client.post("/auth/verify-email-otp", json={
+            "email": "resendotp@example.com",
+            "otp": previous_otp,
+        })
+        assert old_attempt.status_code == 400
+
+        verified = client.post("/auth/verify-email-otp", json={
+            "email": "resendotp@example.com",
+            "otp": new_otp,
+        })
+        assert verified.status_code == 200
+
+    def test_expired_registration_otp_is_rejected(self, client, db, caplog):
+        register = client.post("/auth/register", json={
+            "name": "Expired OTP User",
+            "email": "expiredotp@example.com",
+            "phone": "+255700000403",
+            "password": "TestPass1!",
+        })
+        assert register.status_code == 200
+        otp = extract_email_otp(caplog.text)
+
+        record = db.query(VerificationToken).filter(
+            VerificationToken.purpose == "email_verification_otp"
+        ).first()
+        assert record is not None
+        record.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+        expired = client.post("/auth/verify-email-otp", json={
+            "email": "expiredotp@example.com",
+            "otp": otp,
+        })
+        assert expired.status_code == 400
+
+    def test_link_verification_invalidates_registration_otp(self, client, db, caplog):
+        register = client.post("/auth/register", json={
+            "name": "Link First User",
+            "email": "linkfirst@example.com",
+            "phone": "+255700000404",
+            "password": "TestPass1!",
+        })
+        assert register.status_code == 200
+        otp = extract_email_otp(caplog.text)
+        link_token = extract_verification_token(caplog.text)
+
+        linked = client.post("/auth/verify-email", json={"token": link_token})
+        assert linked.status_code == 200
+
+        otp_attempt = client.post("/auth/verify-email-otp", json={
+            "email": "linkfirst@example.com",
+            "otp": otp,
+        })
+        assert otp_attempt.status_code == 400
 
 
 class TestLogin:

@@ -30,7 +30,9 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   refreshUser: () => Promise<SessionUser | null>;
   verifyEmail: (token: string) => Promise<void>;
+  verifyEmailOtp: (email: string, otp: string) => Promise<void>;
   resendConfirmationEmail: (email: string) => Promise<void>;
+  resendRegistrationOtp: (email: string) => Promise<void>;
   switchRole: (role: string) => Promise<SessionUser>;
   sendPhoneOtp: (phone: string) => Promise<void>;
   verifyPhoneOtp: (phone: string, otp: string) => Promise<void>;
@@ -434,13 +436,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function verifyEmailOtp(email: string, otp: string) {
+    await apiRequest("/auth/verify-email-otp", {
+      method: "POST",
+      auth: false,
+      body: { email: email.trim().toLowerCase(), otp: otp.trim() },
+    });
+  }
+
   async function resendConfirmationEmail(email: string) {
     if (!supabase) {
-      await apiRequest("/auth/verify-email/resend", {
-        method: "POST",
-        auth: false,
-        body: { email: email.trim().toLowerCase() },
-      });
+      await resendRegistrationOtp(email);
       return;
     }
     const { error } = await supabase.auth.resend({
@@ -448,6 +454,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: email.trim().toLowerCase(),
     });
     if (error) throw error;
+  }
+
+  async function resendRegistrationOtp(email: string) {
+    await apiRequest("/auth/verify-email/resend", {
+      method: "POST",
+      auth: false,
+      body: { email: email.trim().toLowerCase() },
+    });
   }
 
   async function switchRole(role: string) {
@@ -485,7 +499,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, login, register, logout, refreshUser, verifyEmail, resendConfirmationEmail, switchRole, sendPhoneOtp, verifyPhoneOtp, sendSmsOtp, verifySmsOtp }}
+      value={{ user, token, loading, login, register, logout, refreshUser, verifyEmail, verifyEmailOtp, resendConfirmationEmail, resendRegistrationOtp, switchRole, sendPhoneOtp, verifyPhoneOtp, sendSmsOtp, verifySmsOtp }}
     >
       {children}
     </AuthContext.Provider>

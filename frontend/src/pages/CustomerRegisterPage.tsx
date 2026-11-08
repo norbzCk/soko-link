@@ -42,7 +42,9 @@ export function CustomerRegisterPage() {
         body: payload,
         auth: false,
       });
-      navigate("/login?registered=customer&verify=1", { replace: true });
+      navigate(`/verify-otp?${new URLSearchParams({ email: payload.email, registered: "customer" }).toString()}`, {
+        replace: true,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
       setIsSubmitting(false);

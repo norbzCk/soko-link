@@ -92,6 +92,9 @@ for endpoint ownership.
   the backend service/query layer.
 - Rate-limit sensitive endpoints (login, registration, verification,
   password recovery, payment initiation).
+- For contact verification, issue short-lived, hashed, single-use OTPs
+  with attempt and resend limits. Never return OTPs in responses or URLs,
+  and never log them in production.
 - Use transactions for multi-step financial, inventory, or order
   workflows. Preserve idempotency where duplicate requests are possible.
 - Add schema changes through Alembic with an upgrade **and** downgrade

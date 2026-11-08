@@ -31,6 +31,7 @@ import { SuperadminProfilePage } from "../pages/SuperadminProfilePage";
 import { SuperadminSettingsPage } from "../pages/SuperadminSettingsPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { VerifyEmailPage } from "../pages/VerifyEmailPage";
+import { VerifyOtpPage } from "../pages/VerifyOtpPage";
 
 import { ProductDetailPage } from "../pages/ProductDetailPage";
 import { TrackDeliveryPage } from "../pages/TrackDeliveryPage";
@@ -56,6 +57,7 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/verify-otp" element={<VerifyOtpPage />} />
       <Route path="/superadmin" element={<SuperadminLoginPage />} />
       <Route path="/register/business" element={<BusinessRegisterPage />} />
       <Route path="/register/customer" element={<CustomerRegisterPage />} />

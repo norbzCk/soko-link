@@ -1,3 +1,4 @@
+import re
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -137,6 +138,32 @@ class TestLogisticsRegister:
         assert data["verification_required"] is True
         assert data["approval_required"] is True
         assert data["userType"] == "logistics"
+
+    def test_register_logistics_email_otp_verifies_before_approval(self, client, db, caplog):
+        response = client.post("/logistics/register", data={
+            "name": "OTP Rider",
+            "phone": "+255700000502",
+            "email": "otp-rider@test.com",
+            "password": "TestPass1!",
+            "account_type": "individual",
+            "vehicle_type": "motorcycle",
+        })
+        assert response.status_code == 200
+        matches = re.findall(r"email verification OTP for \S+ is (\d{6})", caplog.text)
+        assert matches
+
+        verified = client.post("/auth/verify-email-otp", json={
+            "email": "otp-rider@test.com",
+            "otp": matches[-1],
+        })
+        assert verified.status_code == 200
+
+        pending = client.post("/auth/login", json={
+            "email": "otp-rider@test.com",
+            "password": "TestPass1!",
+        })
+        assert pending.status_code == 403
+        assert "approval" in pending.json()["detail"].lower()
 
     def test_register_logistics_duplicate_phone(self, client, db, logistics_user):
         response = client.post("/logistics/register", data={

@@ -45,6 +45,7 @@ export function BusinessRegisterPage() {
     }
     form.delete("confirm_password");
     form.delete("terms");
+    const email = String(form.get("email") || "");
 
     try {
       await apiRequest("/business/register", {
@@ -52,7 +53,9 @@ export function BusinessRegisterPage() {
         body: form,
         auth: false,
       });
-      navigate("/login?registered=seller", { replace: true });
+      navigate(`/verify-otp?${new URLSearchParams({ email, registered: "seller" }).toString()}`, {
+        replace: true,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
       setIsSubmitting(false);
