@@ -6,6 +6,8 @@ from backend.api.main import app
 from backend.services.identity.auth import create_access_token
 from backend.shared.database import SessionLocal
 from backend.shared.models import (
+    ConversationMessage,
+    ConversationThread,
     PaymentTransaction,
     Product,
     Quotation,
@@ -428,3 +430,147 @@ def test_customer_role_cannot_access_seller_workspace(client, db):
     )
     response = client.get("/seller/dashboard", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
+
+def test_frontend_contract_surfaces(client, db):
+    seller = make_seller(db, "Contract Shop", "+255711000020", "contract@example.com")
+    buyer = UserFactory.create(db, email="contract-buyer@example.com", phone="+255722000020")
+    product = ProductFactory.create(
+        db,
+        seller_id=seller.id,
+        name="Contract Rice",
+        status="approved",
+        is_active=True,
+        stock=3,
+        low_stock_threshold=5,
+    )
+    sale = paid_sale(db, seller, buyer, status="Confirmed", suffix="C")
+    sale.rating = 5
+    sale.rated_at = datetime.now(timezone.utc)
+    thread = ConversationThread(sale_id=sale.id, subject="Order questions", last_message_at=datetime.now(timezone.utc))
+    db.add(thread)
+    db.flush()
+    db.add(
+        ConversationMessage(
+            thread_id=thread.id,
+            sender_type="user",
+            sender_id=buyer.id,
+            sender_name=buyer.name,
+            sender_role="customer",
+            text="Is delivery still on track?",
+        )
+    )
+    db.commit()
+    headers = seller_headers(seller)
+
+    dashboard = client.get("/seller/dashboard", headers=headers)
+    assert dashboard.status_code == 200, dashboard.text
+    payload = dashboard.json()
+    assert payload["business"]["id"] == seller.id
+    assert payload["summary"]["orders_total"] == 1
+    assert payload["recent_orders"][0]["id"] == sale.id
+    assert payload["inventory"]["alerts"][0]["product_id"] == product.id
+
+    assert client.get("/seller/products", params={"status": "approved"}, headers=headers).json()["total"] == 1
+    assert client.get("/seller/inventory", headers=headers).json()["items"][0]["id"] == product.id
+    assert client.get("/seller/inventory/alerts", headers=headers).json()["items"][0]["product_id"] == product.id
+
+    customers = client.get("/seller/customers", headers=headers)
+    assert customers.status_code == 200
+    assert customers.json()["items"][0]["buyer_id"] == buyer.id
+    assert client.get(f"/seller/customers/{buyer.id}", headers=headers).json()["customer"]["orders"][0]["id"] == sale.id
+
+    threads = client.get("/seller/threads", headers=headers)
+    assert threads.status_code == 200
+    assert threads.json()["items"][0]["id"] == thread.id
+    messages = client.get(f"/seller/threads/{thread.id}/messages", headers=headers)
+    assert messages.status_code == 200
+    assert messages.json()["items"][0]["timestamp"] is not None
+    sent = client.post(
+        f"/seller/threads/{thread.id}/messages",
+        json={"text": "Yes, the rider is on the way.", "client_id": "contract-1"},
+        headers=headers,
+    )
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["message"]["sender_role"] == "self"
+
+    reviews = client.get("/seller/reviews", headers=headers)
+    assert reviews.status_code == 200
+    assert reviews.json()["items"][0]["sale_id"] == sale.id
+
+    now = datetime.now(timezone.utc)
+    promotion = client.post(
+        "/seller/promotions",
+        json={
+            "product_id": product.id,
+            "name": "Contract promotion",
+            "discount_type": "percent",
+            "discount_value": 10,
+            "starts_at": now.isoformat(),
+            "ends_at": (now + timedelta(days=7)).isoformat(),
+        },
+        headers=headers,
+    )
+    assert promotion.status_code == 201, promotion.text
+    promotion_id = promotion.json()["promotion"]["id"]
+    assert client.get("/seller/promotions", headers=headers).json()["items"][0]["id"] == promotion_id
+
+    rfq = client.post(
+        "/rfq/",
+        json={
+            "company_name": "Contract Hotel",
+            "contact_name": "Buyer",
+            "email": "contract-hotel@example.com",
+            "phone": "+255722000021",
+            "product_interest": "Contract Rice",
+            "quantity": 10,
+        },
+    )
+    assert rfq.status_code == 201, rfq.text
+    rfq_id = rfq.json()["id"]
+    assert client.get("/seller/rfqs", headers=headers).json()["items"][0]["id"] == rfq_id
+    assert client.get(f"/seller/rfqs/{rfq_id}", headers=headers).status_code == 200
+    assert client.post(
+        f"/seller/rfqs/{rfq_id}/clarifications",
+        json={"question": "Can you confirm the delivery address?"},
+        headers=headers,
+    ).status_code == 201
+    quote = client.post(
+        f"/seller/rfqs/{rfq_id}/quotations",
+        json={"unit_price": 4800, "lead_time_days": 2, "notes": "Contract quote"},
+        headers=headers,
+    )
+    assert quote.status_code == 201, quote.text
+    assert client.get("/seller/quotations", headers=headers).json()["items"][0]["rfq"]["id"] == rfq_id
+
+    status_update = client.patch(
+        f"/seller/orders/{sale.id}/status",
+        json={"status": "Packed"},
+        headers=headers,
+    )
+    assert status_update.status_code == 200, status_update.text
+
+    logistics = LogisticsUserFactory.create(db, phone="+255733000020", email="contract-rider@example.com")
+    assigned = client.post(
+        f"/seller/orders/{sale.id}/assign-delivery",
+        json={"logistics_id": logistics.id},
+        headers=headers,
+    )
+    assert assigned.status_code == 200, assigned.text
+    delivery_id = assigned.json()["delivery"]["id"]
+    assert client.get(f"/seller/deliveries/{delivery_id}", headers=headers).status_code == 200
+    instructions = client.patch(
+        f"/seller/deliveries/{delivery_id}/instructions",
+        json={"special_instructions": "Call on arrival"},
+        headers=headers,
+    )
+    assert instructions.status_code == 200, instructions.text
+
+    assert client.get("/seller/disputes", headers=headers).status_code == 200
+    settings = client.get("/seller/settings", headers=headers)
+    assert settings.status_code == 200
+    assert settings.json()["business"]["website_url"] is None
+    assert client.get("/seller/finance/transactions", headers=headers).json()["total"] == 1
+    assert client.get("/seller/payout-account", headers=headers).status_code == 200
+    analytics = client.get("/seller/analytics", params={"range_days": 30}, headers=headers)
+    assert analytics.status_code == 200
+    assert analytics.json()["summary"]["orders"] == 1

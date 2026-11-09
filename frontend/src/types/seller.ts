@@ -276,13 +276,15 @@ export interface SellerThread {
 }
 
 export interface SellerMessage {
-  id: number;
-  sender_type: string;
+  id: string;
+  client_id?: string | null;
   sender_id: number;
   sender_name: string;
   sender_role: string;
   text: string;
-  created_at?: string | null;
+  timestamp?: string | null;
+  status?: string | null;
+  type?: string | null;
 }
 
 export interface SellerDispute {

@@ -446,13 +446,13 @@ export function SellerWorkspacePage() {
                     <div
                       key={message.id}
                       className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                        message.sender_type === "business"
+                        message.sender_role === "self"
                           ? "ml-auto bg-brand/10 text-text"
                           : "bg-surface-soft text-text"
                       }`}
                     >
                       <p className="text-[11px] font-semibold text-text-muted">
-                        {message.sender_name || message.sender_role} · {formatDateTime(message.created_at)}
+                        {message.sender_name || message.sender_role} · {formatDateTime(message.timestamp)}
                       </p>
                       <p>{message.text}</p>
                     </div>

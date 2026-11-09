@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { BarChart3, Download, Megaphone, MessageSquareQuote, RefreshCw, Star, X } from "lucide-react";
+import { BarChart3, Download, Megaphone, MessagesSquare, RefreshCw, Star, X } from "lucide-react";
 import { PageIntro, SectionCard, EmptyState } from "../components/ui/PageSections";
 import { Button } from "../components/ui/Button";
 import { Input, Select, Textarea } from "../components/ui/Field";
@@ -295,7 +295,7 @@ export function SellerGrowthPage() {
             ) : rfqs.error ? (
               <SellerError message={rfqs.error} onRetry={rfqs.reload} />
             ) : rfqs.data && rfqs.data.items.length === 0 ? (
-              <EmptyState title="No open RFQs" description="New buyer requests will appear here." icon={<MessageSquareQuote size={22} />} />
+              <EmptyState title="No open RFQs" description="New buyer requests will appear here." icon={<MessagesSquare size={22} />} />
             ) : (
               <div className="space-y-2">
                 {rfqs.data?.items.map((rfq) => (
@@ -409,7 +409,7 @@ export function SellerGrowthPage() {
           ) : quotations.error ? (
             <SellerError message={quotations.error} onRetry={quotations.reload} />
           ) : quotations.data && quotations.data.items.length === 0 ? (
-            <EmptyState title="No quotations yet" description="Quote an RFQ to start tracking responses." icon={<MessageSquareQuote size={22} />} />
+            <EmptyState title="No quotations yet" description="Quote an RFQ to start tracking responses." icon={<MessagesSquare size={22} />} />
           ) : (
             <div className="space-y-2">
               {quotations.data?.items.map((quotation) => (
