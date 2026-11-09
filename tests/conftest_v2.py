@@ -3,13 +3,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.api.main import app
-from backend.shared.database import SessionLocal, engine, Base
-from backend.shared.models import User, BusinessUser, LogisticsUser, Product, Provider, Sale, BusinessMetrics
+from backend.api.schema import ensure_schema_columns
+from backend.shared.database import SessionLocal, engine
+from backend.shared.models import Base, User, BusinessUser, LogisticsUser, Product, Provider, Sale, BusinessMetrics
 
 
 @pytest.fixture(autouse=True)
 def setup_test_db():
     Base.metadata.create_all(bind=engine)
+    ensure_schema_columns()
     yield
     Base.metadata.drop_all(bind=engine)
 

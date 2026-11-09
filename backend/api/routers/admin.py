@@ -641,3 +641,325 @@ def delete_superadmin_logistics(
     db.delete(item)
     db.commit()
     return {"message": "Logistics account deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Seller workspace moderation and finance controls
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timezone  # noqa: E402
+
+from sqlalchemy import or_  # noqa: E402
+
+from backend.shared.models import (  # noqa: E402
+    Product,
+    ReviewReport,
+    SellerPayout,
+    SellerPayoutAccount,
+)
+
+
+def _admin_notify_seller(db: Session, seller_id: int, *, title: str, message: str, severity: str = "info", href: str = "/app/seller"):
+    seller = db.query(BusinessUser).filter(BusinessUser.id == seller_id).first()
+    if not seller:
+        return
+    recipient_type, recipient_id, email, name = resolve_subject(seller)
+    create_notification(
+        db,
+        recipient_type=recipient_type,
+        recipient_id=recipient_id,
+        recipient_email=email,
+        title=title,
+        message=message,
+        notification_type="seller_admin",
+        severity=severity,
+        action_href=href,
+        send_email=bool(email),
+        email_subject=title,
+        email_body=f"Hello {name},\n\n{message}\n\nSokoLnk Seller Workspace",
+    )
+
+
+@router.get("/superadmin/products/moderation")
+def superadmin_product_moderation_queue(
+    status: str = "pending",
+    q: str | None = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("super_admin", "owner")),
+):
+    if status not in {"draft", "pending", "approved", "rejected", "archived"}:
+        raise HTTPException(status_code=400, detail="Unknown product status")
+    query = db.query(Product).filter(Product.status == status)
+    if q:
+        term = f"%{q.strip()}%"
+        query = query.filter(or_(Product.name.ilike(term), Product.category.ilike(term)))
+    products = query.order_by(Product.submitted_at.asc().nullslast(), Product.id.asc()).limit(200).all()
+    seller_ids = [product.seller_id for product in products if product.seller_id]
+    sellers = db.query(BusinessUser).filter(BusinessUser.id.in_(seller_ids)).all() if seller_ids else []
+    seller_map = {seller.id: seller for seller in sellers}
+    return {
+        "items": [
+            {
+                "id": product.id,
+                "name": product.name,
+                "category": product.category,
+                "price": float(product.price or 0),
+                "stock": int(product.stock or 0),
+                "description": product.description,
+                "image_url": product.image_url,
+                "unit": product.unit,
+                "status": product.status,
+                "moderation_reason": product.moderation_reason,
+                "submitted_at": product.submitted_at.isoformat() if product.submitted_at else None,
+                "seller": {
+                    "id": product.seller_id,
+                    "business_name": seller_map[product.seller_id].business_name
+                    if product.seller_id in seller_map
+                    else None,
+                    "verification_status": seller_map[product.seller_id].verification_status
+                    if product.seller_id in seller_map
+                    else None,
+                },
+            }
+            for product in products
+        ]
+    }
+
+
+@router.patch("/superadmin/products/{product_id}/moderation")
+def superadmin_moderate_product(
+    product_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_roles("super_admin", "owner")),
+):
+    product = db.query(Product).filter(Product.id == product_id).with_for_update().first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    decision = (payload.get("decision") or "").strip().lower()
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(status_code=400, detail="decision must be approve or reject")
+    reason = (payload.get("reason") or "").strip() or None
+    if decision == "reject" and not reason:
+        raise HTTPException(status_code=400, detail="A rejection reason is required")
+    if not product.seller_id:
+        raise HTTPException(status_code=400, detail="Product is not linked to a seller account")
+
+    if decision == "approve":
+        product.status = "approved"
+        product.is_active = True
+        product.approved_at = datetime.now(timezone.utc)
+        product.approved_by = getattr(current, "id", None)
+        product.moderation_reason = None
+        title = "Product approved"
+        message = f"{product.name} is now live in the marketplace."
+        severity = "success"
+    else:
+        product.status = "rejected"
+        product.is_active = False
+        product.moderation_reason = reason
+        product.approved_at = None
+        product.approved_by = None
+        title = "Product rejected"
+        message = f"{product.name} was not approved: {reason}"
+        severity = "warning"
+    db.add(product)
+    _admin_notify_seller(db, product.seller_id, title=title, message=message, severity=severity, href="/app/seller/catalog")
+    db.commit()
+    return {"message": title, "product_id": product.id, "status": product.status}
+
+
+@router.get("/superadmin/payouts")
+def superadmin_payouts(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("super_admin", "owner")),
+):
+    query = db.query(SellerPayout)
+    if status:
+        query = query.filter(SellerPayout.status == status)
+    payouts = query.order_by(SellerPayout.id.desc()).limit(200).all()
+    seller_ids = [payout.seller_id for payout in payouts]
+    sellers = db.query(BusinessUser).filter(BusinessUser.id.in_(seller_ids)).all() if seller_ids else []
+    seller_map = {seller.id: seller for seller in sellers}
+    return {
+        "items": [
+            {
+                "id": payout.id,
+                "seller_id": payout.seller_id,
+                "seller_name": seller_map[payout.seller_id].business_name if payout.seller_id in seller_map else None,
+                "amount": float(payout.amount or 0),
+                "currency": payout.currency,
+                "status": payout.status,
+                "method": payout.method,
+                "destination_label": payout.destination_label,
+                "reference": payout.reference,
+                "note": payout.note,
+                "rejection_reason": payout.rejection_reason,
+                "requested_at": payout.requested_at.isoformat() if payout.requested_at else None,
+                "processed_at": payout.processed_at.isoformat() if payout.processed_at else None,
+            }
+            for payout in payouts
+        ]
+    }
+
+
+@router.patch("/superadmin/payouts/{payout_id}")
+def superadmin_update_payout(
+    payout_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_roles("super_admin", "owner")),
+):
+    payout = db.query(SellerPayout).filter(SellerPayout.id == payout_id).with_for_update().first()
+    if not payout:
+        raise HTTPException(status_code=404, detail="Payout not found")
+    target = (payload.get("status") or "").strip().lower()
+    allowed = {
+        "requested": {"approved", "rejected"},
+        "approved": {"processing", "completed", "rejected"},
+        "processing": {"completed", "rejected"},
+    }
+    if target not in allowed.get(payout.status, set()):
+        raise HTTPException(status_code=400, detail=f"Cannot move payout from {payout.status} to {target or 'unknown'}")
+    reason = (payload.get("reason") or "").strip() or None
+    if target == "rejected" and not reason:
+        raise HTTPException(status_code=400, detail="A rejection reason is required")
+    payout.status = target
+    payout.rejection_reason = reason if target == "rejected" else None
+    payout.processed_at = datetime.now(timezone.utc) if target in {"completed", "rejected"} else payout.processed_at
+    payout.processed_by = getattr(current, "id", None)
+    db.add(payout)
+    message = (
+        f"Your payout {payout.reference or payout.id} was completed."
+        if target == "completed"
+        else f"Your payout {payout.reference or payout.id} is now {target}."
+        + (f" Reason: {reason}" if reason else "")
+    )
+    _admin_notify_seller(
+        db,
+        payout.seller_id,
+        title=f"Payout {target}",
+        message=message,
+        severity="success" if target == "completed" else ("warning" if target == "rejected" else "info"),
+        href="/app/seller/finance",
+    )
+    db.commit()
+    return {"message": "Payout updated", "status": payout.status}
+
+
+@router.get("/superadmin/payout-accounts")
+def superadmin_payout_accounts(
+    status: str | None = "pending",
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("super_admin", "owner")),
+):
+    query = db.query(SellerPayoutAccount)
+    if status:
+        query = query.filter(SellerPayoutAccount.status == status)
+    accounts = query.order_by(SellerPayoutAccount.id.desc()).limit(200).all()
+    seller_ids = [account.seller_id for account in accounts]
+    sellers = db.query(BusinessUser).filter(BusinessUser.id.in_(seller_ids)).all() if seller_ids else []
+    seller_map = {seller.id: seller for seller in sellers}
+    return {
+        "items": [
+            {
+                "id": account.id,
+                "seller_id": account.seller_id,
+                "seller_name": seller_map[account.seller_id].business_name if account.seller_id in seller_map else None,
+                "method": account.method,
+                "account_name": account.account_name,
+                "account_number_masked": account.account_number_masked,
+                "status": account.status,
+                "rejection_reason": account.rejection_reason,
+                "updated_at": account.updated_at.isoformat() if account.updated_at else None,
+            }
+            for account in accounts
+        ]
+    }
+
+
+@router.patch("/superadmin/payout-accounts/{account_id}")
+def superadmin_verify_payout_account(
+    account_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_roles("super_admin", "owner")),
+):
+    account = db.query(SellerPayoutAccount).filter(SellerPayoutAccount.id == account_id).with_for_update().first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Payout account not found")
+    decision = (payload.get("decision") or "").strip().lower()
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(status_code=400, detail="decision must be approve or reject")
+    reason = (payload.get("reason") or "").strip() or None
+    if decision == "reject" and not reason:
+        raise HTTPException(status_code=400, detail="A rejection reason is required")
+    account.status = "verified" if decision == "approve" else "rejected"
+    account.rejection_reason = reason if decision == "reject" else None
+    account.verified_by = getattr(current, "id", None)
+    account.verified_at = datetime.now(timezone.utc) if decision == "approve" else None
+    db.add(account)
+    _admin_notify_seller(
+        db,
+        account.seller_id,
+        title="Payout account verified" if decision == "approve" else "Payout account rejected",
+        message=(
+            "Your payout account was verified. You can now request payouts."
+            if decision == "approve"
+            else f"Your payout account could not be verified: {reason}"
+        ),
+        severity="success" if decision == "approve" else "warning",
+        href="/app/seller/finance",
+    )
+    db.commit()
+    return {"message": "Payout account updated", "status": account.status}
+
+
+@router.get("/superadmin/review-reports")
+def superadmin_review_reports(
+    status: str = "open",
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("super_admin", "owner")),
+):
+    reports = (
+        db.query(ReviewReport)
+        .filter(ReviewReport.status == status)
+        .order_by(ReviewReport.id.desc())
+        .limit(200)
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "id": report.id,
+                "sale_id": report.sale_id,
+                "seller_id": report.seller_id,
+                "reason": report.reason,
+                "status": report.status,
+                "created_at": report.created_at.isoformat() if report.created_at else None,
+            }
+            for report in reports
+        ]
+    }
+
+
+@router.patch("/superadmin/review-reports/{report_id}")
+def superadmin_resolve_review_report(
+    report_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_roles("super_admin", "owner")),
+):
+    report = db.query(ReviewReport).filter(ReviewReport.id == report_id).with_for_update().first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    decision = (payload.get("decision") or "").strip().lower()
+    if decision not in {"upheld", "dismissed"}:
+        raise HTTPException(status_code=400, detail="decision must be upheld or dismissed")
+    report.status = decision
+    report.resolved_at = datetime.now(timezone.utc)
+    report.resolved_by = getattr(current, "id", None)
+    db.add(report)
+    db.commit()
+    return {"message": "Review report resolved", "status": report.status}

@@ -6,7 +6,7 @@ the routers without changing their public paths.
 | Service | Package | Owns | Main routes |
 | --- | --- | --- | --- |
 | Identity | `backend/services/identity` | Authentication, tokens, customers, Supabase identity bridge | `/auth/*`, `/customers/*` |
-| Sellers | `backend/services/sellers` | Seller registration, profiles, seller order queue and fulfilment | `/business/*` |
+| Sellers | `backend/services/sellers` | Seller registration, profiles, catalogue moderation, inventory, order fulfilment, quotations, finance and workspace | `/business/*`, `/seller/*` |
 | Catalog | `backend/services/catalog` | Products, providers, RFQs, image uploads | `/products/*`, `/providers/*`, `/rfq/*` |
 | Orders | `backend/services/orders` | Checkout, order lifecycle, inventory reservations, status sync | `/orders/*` |
 | Payments | `backend/services/payments` | Payment attempts, transactions, provider callbacks | `/payments/*` |
@@ -34,8 +34,8 @@ The current database is shared. The table groups below are the intended future
 ownership boundary:
 
 - Identity: `users`, `refresh_tokens`, `token_blocklist`, `customers`
-- Sellers: `business_users`, `business_metrics`, `business_verifications`
-- Catalog: `products`, `providers`, `rfqs`
+- Sellers: `business_users`, `business_metrics`, `business_verifications`, `seller_payout_accounts`, `seller_payouts`, `promotions`
+- Catalog: `products`, `providers`, `rfqs`, `inventory_movements`, `quotations`, `quotation_events`, `rfq_clarifications`, `review_replies`, `review_reports`
 - Orders: `orders`, `order_items`, `order_status_history`, `inventory_reservations`, legacy `sales`
 - Payments: `payment_transactions`, `payment_attempts`
 - Delivery: `delivery_orders`, `shipment_events`, `logistics_users`, `logistics_metrics`

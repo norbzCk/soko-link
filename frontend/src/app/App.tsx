@@ -22,6 +22,11 @@ import { ProfilePage } from "../pages/ProfilePage";
 import { ProvidersPage } from "../pages/ProvidersPage";
 import { SellerDashboardPage } from "../pages/SellerDashboardPage";
 import { SellerDeliveriesPage } from "../pages/SellerDeliveriesPage";
+import { SellerCatalogPage } from "../pages/SellerCatalogPage";
+import { SellerFinancePage } from "../pages/SellerFinancePage";
+import { SellerGrowthPage } from "../pages/SellerGrowthPage";
+import { SellerOrdersPage } from "../pages/SellerOrdersPage";
+import { SellerWorkspacePage } from "../pages/SellerWorkspacePage";
 import { SellerProfilePage } from "../pages/SellerProfilePage";
 import { SuperadminDashboardPage } from "../pages/SuperadminDashboardPage";
 import { SuperadminLoginPage } from "../pages/SuperadminLoginPage";
@@ -76,6 +81,11 @@ export function App() {
         <Route path="superadmin" element={<RoleRoute allowedRoles={["super_admin", "owner"]}><SuperadminDashboardPage /></RoleRoute>} />
         <Route path="analyst" element={<RoleRoute allowedRoles={["analyst"]}><AdminDashboardPage /></RoleRoute>} />
         <Route path="seller" element={<RoleRoute allowedRoles={["seller"]}><SellerDashboardPage /></RoleRoute>} />
+        <Route path="seller/catalog" element={<RoleRoute allowedRoles={["seller"]}><SellerCatalogPage /></RoleRoute>} />
+        <Route path="seller/orders" element={<RoleRoute allowedRoles={["seller"]}><SellerOrdersPage /></RoleRoute>} />
+        <Route path="seller/growth" element={<RoleRoute allowedRoles={["seller"]}><SellerGrowthPage /></RoleRoute>} />
+        <Route path="seller/finance" element={<RoleRoute allowedRoles={["seller"]}><SellerFinancePage /></RoleRoute>} />
+        <Route path="seller/workspace" element={<RoleRoute allowedRoles={["seller"]}><SellerWorkspacePage /></RoleRoute>} />
         <Route path="seller/profile" element={<RoleRoute allowedRoles={["seller"]}><SellerProfilePage /></RoleRoute>} />
         <Route path="seller/deliveries" element={<RoleRoute allowedRoles={["seller"]}><SellerDeliveriesPage /></RoleRoute>} />
         <Route path="customer" element={<RoleRoute allowedRoles={["user"]}><CustomerDashboardPage /></RoleRoute>} />

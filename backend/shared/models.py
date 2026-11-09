@@ -83,6 +83,19 @@ class Product(Base):
     provider_id = Column(Integer, nullable=True)
     rating_avg = Column(Float, nullable=False, default=0.0)
     rating_count = Column(Integer, nullable=False, default=0)
+    # Seller catalogue moderation lifecycle. Legacy rows and products created
+    # through the original management endpoint default to approved so the
+    # existing customer experience keeps working.
+    status = Column(String, nullable=False, default="approved", index=True)  # draft, pending, approved, rejected, archived
+    moderation_reason = Column(Text, nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(Integer, nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    unit = Column(String, nullable=True, default="piece")
+    variants_json = Column(Text, nullable=True)
+    specifications_json = Column(Text, nullable=True)
+    low_stock_threshold = Column(Integer, nullable=False, default=5)
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -183,14 +196,17 @@ class RFQ(Base):
     __tablename__ = "rfqs"
 
     id = Column(Integer, primary_key=True, index=True)
+    buyer_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     company_name = Column(String, nullable=False)
     contact_name = Column(String, nullable=False)
     email = Column(String, nullable=False)
     phone = Column(String, nullable=True)
     product_interest = Column(String, nullable=False)
+    category = Column(String, nullable=True, index=True)
     quantity = Column(Integer, nullable=False, default=1)
     target_budget = Column(String, nullable=True)
     notes = Column(String, nullable=True)
+    deadline = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, nullable=False, default="New")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -588,4 +604,161 @@ class AssistantConversationMessage(Base):
     # user to explicitly confirm before it actually executes.
     pending_action_json = Column(Text, nullable=True)
     resolved = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class InventoryMovement(Base):
+    """Append-only ledger of every stock change for a seller product."""
+
+    __tablename__ = "inventory_movements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    seller_id = Column(Integer, nullable=False, index=True)
+    movement_type = Column(String, nullable=False, index=True)  # receipt, sale, reservation, release, adjustment, damage, loss, return, correction
+    quantity_delta = Column(Integer, nullable=False)
+    balance_after = Column(Integer, nullable=False)
+    reason = Column(Text, nullable=True)
+    reference_type = Column(String, nullable=True)
+    reference_id = Column(Integer, nullable=True)
+    actor_type = Column(String, nullable=False, default="seller")
+    actor_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Quotation(Base):
+    __tablename__ = "quotations"
+    __table_args__ = (UniqueConstraint("rfq_id", "seller_id", name="uq_quotation_rfq_seller"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    rfq_id = Column(Integer, ForeignKey("rfqs.id"), nullable=False, index=True)
+    seller_id = Column(Integer, nullable=False, index=True)
+    unit_price = Column(Float, nullable=False)
+    total_price = Column(Float, nullable=False)
+    currency = Column(String, nullable=False, default="NGN")
+    lead_time_days = Column(Integer, nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="submitted", index=True)  # submitted, revised, withdrawn, accepted, rejected, expired
+    version = Column(Integer, nullable=False, default=1)
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
+    withdrawn_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class QuotationEvent(Base):
+    __tablename__ = "quotation_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quotation_id = Column(Integer, ForeignKey("quotations.id"), nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    details_json = Column(Text, nullable=True)
+    actor_type = Column(String, nullable=False, default="seller")
+    actor_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class RFQClarification(Base):
+    __tablename__ = "rfq_clarifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rfq_id = Column(Integer, ForeignKey("rfqs.id"), nullable=False, index=True)
+    seller_id = Column(Integer, nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=True)
+    answered_by = Column(Integer, nullable=True)
+    answered_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class SellerPayoutAccount(Base):
+    __tablename__ = "seller_payout_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    seller_id = Column(Integer, nullable=False, unique=True, index=True)
+    method = Column(String, nullable=False, default="bank_transfer")
+    account_name = Column(String, nullable=False)
+    account_number_masked = Column(String, nullable=False)
+    details_json = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="pending", index=True)  # pending, verified, rejected
+    rejection_reason = Column(Text, nullable=True)
+    verified_by = Column(Integer, nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SellerPayout(Base):
+    __tablename__ = "seller_payouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    seller_id = Column(Integer, nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    currency = Column(String, nullable=False, default="NGN")
+    status = Column(String, nullable=False, default="requested", index=True)  # requested, approved, processing, completed, rejected, cancelled
+    method = Column(String, nullable=True)
+    destination_label = Column(String, nullable=True)
+    reference = Column(String, nullable=True, unique=True, index=True)
+    idempotency_key = Column(String, nullable=True, unique=True, index=True)
+    note = Column(Text, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    requested_at = Column(DateTime(timezone=True), server_default=func.now())
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    processed_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ReviewReply(Base):
+    __tablename__ = "review_replies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sale_id = Column(Integer, ForeignKey("sales.id"), nullable=False, unique=True, index=True)
+    seller_id = Column(Integer, nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ReviewReport(Base):
+    __tablename__ = "review_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sale_id = Column(Integer, ForeignKey("sales.id"), nullable=False, index=True)
+    seller_id = Column(Integer, nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="open", index=True)  # open, upheld, dismissed
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(Integer, nullable=True)
+
+
+class Promotion(Base):
+    __tablename__ = "promotions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    seller_id = Column(Integer, nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    discount_type = Column(String, nullable=False, default="percent")  # percent, fixed
+    discount_value = Column(Float, nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, nullable=False, default="scheduled", index=True)  # draft, scheduled, active, paused, expired, rejected
+    rejection_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DisputeMessage(Base):
+    __tablename__ = "dispute_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dispute_id = Column(Integer, ForeignKey("disputes.id"), nullable=False, index=True)
+    sender_type = Column(String, nullable=False, index=True)  # buyer, seller, logistics, admin
+    sender_id = Column(Integer, nullable=True, index=True)
+    message = Column(Text, nullable=True)
+    evidence_url = Column(String, nullable=True)
+    is_internal = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

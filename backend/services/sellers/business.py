@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Header, Request, Response, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 from backend.shared.database import get_db
 from backend.shared.models import (
@@ -300,6 +300,11 @@ def _serialize_business(user: BusinessUser, include_email: bool = True) -> dict:
         "shop_images": user.shop_images,
         "profile_photo": user.profile_photo,
         "auto_confirm": user.auto_confirm,
+        "website_url": user.website_url,
+        "social_facebook": user.social_facebook,
+        "social_instagram": user.social_instagram,
+        "social_whatsapp": user.social_whatsapp,
+        "social_x": user.social_x,
         "verification_status": user.verification_status,
         "role": user.role,
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -684,9 +689,13 @@ def _seller_products_query(db: Session, user: BusinessUser):
 
 
 def _seller_sales_query(db: Session, user: BusinessUser):
-    # Keep compatibility with older records where seller_id was not populated yet.
+    # Keep compatibility with legacy rows that predate seller_id, but never let
+    # a name collision grant access to another seller's populated record.
     return db.query(Sale).filter(
-        or_(Sale.seller_id == user.id, Sale.provider_name == user.business_name)
+        or_(
+            Sale.seller_id == user.id,
+            and_(Sale.seller_id.is_(None), Sale.provider_name == user.business_name),
+        )
     )
 
 
@@ -811,7 +820,7 @@ def _serialize_seller_orders(db: Session, orders: list[Sale]) -> list[dict]:
 def _ensure_order_owner(order: Sale, user: BusinessUser):
     if order.seller_id == user.id:
         return
-    if (order.provider_name or "").strip().lower() == (user.business_name or "").strip().lower():
+    if order.seller_id is None and (order.provider_name or "").strip().lower() == (user.business_name or "").strip().lower():
         return
     raise HTTPException(status_code=403, detail="Order does not belong to this business account")
 
@@ -1768,6 +1777,11 @@ def get_business_public_profile(
         "shop_images": user.shop_images,
         "profile_photo": user.profile_photo,
         "auto_confirm": user.auto_confirm,
+        "website_url": user.website_url,
+        "social_facebook": user.social_facebook,
+        "social_instagram": user.social_instagram,
+        "social_whatsapp": user.social_whatsapp,
+        "social_x": user.social_x,
         "verification_status": user.verification_status,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "metrics": {

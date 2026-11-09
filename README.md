@@ -19,6 +19,10 @@ Contributors must start from the current implementation, not rebuild it:
   design quality gates.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — required workflow, verification
   commands, and review checklist.
+- [docs/seller-workspace.md](docs/seller-workspace.md) — seller API, isolation
+  rules, catalogue, finance and security behaviour.
+- [docs/rbac-permissions.md](docs/rbac-permissions.md) — role matrix,
+  verification and moderation permissions.
 
 See [docs/architecture/overview.md](docs/architecture/overview.md) for the
 detailed repository and request-flow documentation.

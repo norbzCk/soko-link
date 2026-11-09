@@ -31,6 +31,7 @@ from backend.services.notifications.notifications import router as notifications
 from backend.services.orders.sales import router as sales_router
 from backend.services.payments.payments import router as payments_router
 from backend.services.sellers.business import router as business_router
+from backend.services.sellers.workspace import router as seller_workspace_router
 from backend.shared.database import SessionLocal, engine
 from backend.shared.models import Base, Product, Sale
 
@@ -126,6 +127,7 @@ app.include_router(rfq_router)
 app.include_router(providers_router)
 app.include_router(payments_router)
 app.include_router(business_router)
+app.include_router(seller_workspace_router)
 app.include_router(logistics_router)
 app.include_router(notifications_router)
 app.include_router(auth_router)
