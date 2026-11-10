@@ -39,10 +39,11 @@ The current verified baseline is:
 - **One relational database** --- PostgreSQL is the production target;
   SQLite is supported for local development and the automated test
   suite. Alembic is the schema-evolution mechanism.
-- **Docker/Compose, Render, Railway, Netlify, and GitHub Pages
-  configuration files exist**, but their live deployment status is
-  unverified. A configuration file is not proof that a service is
-  running or healthy.
+- **Render is the intended primary host** because `render.yaml` defines the
+  frontend, backend, and managed PostgreSQL database. Railway and Netlify
+  configuration artifacts remain, but their live status is unverified. The
+  GitHub Pages deployment workflow has been removed. A configuration file is
+  not proof that a service is running or healthy.
 
 Some integrations are deliberately incomplete or environment-dependent
 (notably mobile-money production credentials, SMTP delivery, and durable
@@ -106,7 +107,7 @@ deployment and integration details.
 | Backend | Python 3.11+, FastAPI, Pydantic, SQLAlchemy, Alembic; one gateway process | Implemented |
 | Database | SQLite for local development/tests; PostgreSQL target for deployment; migrations in `alembic/` | Implemented locally; production unverified |
 | Containers | `Dockerfile.backend`, `Dockerfile.frontend`, `docker-compose.yml`, `Caddyfile` | Present; runtime/deployment unverified |
-| Hosting config | `render.yaml`, `railway.toml`, `netlify.toml`, GitHub Pages workflow | Present; live state unverified |
+| Hosting config | Render Blueprint in `render.yaml`; secondary Railway/Netlify files | Render intended; live state unverified; Pages workflow removed |
 | Identity | JWT access/refresh cookies, refresh rotation, hashed verification/reset tokens, registration email OTP and link verification, phone OTP, role applications, optional Supabase bridge | Implemented |
 | Payments | M-Pesa, Airtel Money and Tigo Pesa adapters with webhook/poll handling; manual bank transfer and cash-on-delivery flows | Partially implemented --- provider production verification pending |
 | Uploads | Images stored as base64 data URIs in database columns via `backend/shared/utils/uploads.py`; 2 MB raw limit | Implemented |
@@ -123,8 +124,7 @@ tree or reorganise modules without an approved ADR and a migration plan.
 backend/
 ├── api/
 │   ├── main.py                 # App factory, CORS, lifespan, router wiring
-│   ├── schema.py               # Transitional schema safety net
-│   ├── seed.py                 # Demo marketplace bootstrap
+│   ├── schema.py               # Legacy compatibility patcher; not production startup
 │   └── routers/                # Gateway-owned cross-cutting endpoints
 ├── services/
 │   ├── identity/               # Auth, users, customers, Supabase bridge
@@ -145,6 +145,14 @@ backend/
 alembic/                        # Database migrations
 tests/                          # Backend integration/regression suite
 ```
+
+API startup deliberately performs no schema creation, runtime schema patching,
+or demo seeding. Production schema changes are migration controlled through
+Alembic. `backend/api/schema.py` is retained for legacy test compatibility only
+and is not called from production startup. The former `backend/api/seed.py`
+demo seed was removed; production and normal application startup create no fake
+marketplace records. See [hosted deployment](docs/hosted-deploy.md) for the
+Render configuration and the migration review caveat.
 
 ### 4.1 Layer responsibilities
 

@@ -48,6 +48,12 @@ services:
           name: sales-db
           property: connectionString
 
+      - key: APP_ENV
+        value: production
+
+      - key: FRONTEND_URL
+        value: https://sokolink-frontend.onrender.com
+
       - key: SUPABASE_URL
         value: https://jjryzuwfzneyxtkkjejd.supabase.co
 
@@ -61,7 +67,28 @@ services:
         generateValue: true
 
       - key: CORS_ORIGINS
-        value: "https://norbzCk.github.io,https://sokolink-frontend.onrender.com,http://localhost:5173,http://localhost:3000"
+        value: "https://sokolink-frontend.onrender.com"
+
+      - key: SMTP_HOST
+        sync: false
+
+      - key: SMTP_PORT
+        value: "587"
+
+      - key: SMTP_USERNAME
+        sync: false
+
+      - key: SMTP_PASSWORD
+        sync: false
+
+      - key: SMTP_FROM_EMAIL
+        sync: false
+
+      - key: SMTP_FROM_NAME
+        value: Soko-Link
+
+      - key: SMTP_USE_TLS
+        value: "true"
 
 
 # =========================

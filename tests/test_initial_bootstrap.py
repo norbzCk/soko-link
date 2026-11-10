@@ -93,3 +93,42 @@ def test_bootstrap_creates_three_database_accounts_and_is_idempotent(monkeypatch
         headers={"Authorization": f"Bearer {tokens['customer@example.test']}"},
     )
     assert customer_dashboard.status_code == 403
+
+    seller_headers = {"Authorization": f"Bearer {tokens['seller@example.test']}"}
+    image_response = client.post(
+        "/products/upload-image",
+        headers=seller_headers,
+        files={"file": ("item.png", b"small-image-payload", "image/png")},
+    )
+    assert image_response.status_code == 200
+    image_url = image_response.json()["image_url"]
+    assert image_url.startswith("data:image/png;base64,")
+
+    product_response = client.post(
+        "/seller/products",
+        headers=seller_headers,
+        json={
+            "name": "Initial Seller Product",
+            "category": "Produce",
+            "price": 1200,
+            "stock": 5,
+            "image_url": image_url,
+            "submit": False,
+        },
+    )
+    assert product_response.status_code == 201
+    created_product = product_response.json()["product"]
+    assert created_product["name"] == "Initial Seller Product"
+    assert created_product["image_url"] == image_url
+    assert created_product["status"] == "draft"
+
+    seller_products = client.get("/seller/products", headers=seller_headers)
+    assert seller_products.status_code == 200
+    assert any(item["id"] == created_product["id"] for item in seller_products.json()["items"])
+
+    customer_product_response = client.post(
+        "/seller/products",
+        headers={"Authorization": f"Bearer {tokens['customer@example.test']}"},
+        json={"name": "Unauthorized product", "category": "Produce", "price": 10, "stock": 1},
+    )
+    assert customer_product_response.status_code == 403

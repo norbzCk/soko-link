@@ -1,37 +1,95 @@
-Hosted deployment checklist
+# Hosted deployment baseline
 
-What I changed
+## Primary host: Render
 
-- Updated `render.yaml` to set `CORS_ORIGINS` to explicit origins (no wildcard):
-  - `https://norbzCk.github.io`
-  - `https://sokolink-frontend.onrender.com` (Render frontend service)
-  - `http://localhost:5173`, `http://localhost:3000` (local dev)
+`render.yaml` is the only complete deployment blueprint in this repository: it
+defines the static frontend, FastAPI backend, and managed PostgreSQL database.
+Treat Render as the intended primary host. This describes repository
+configuration; it does not verify that the services are deployed, healthy, or
+using the current blueprint.
 
-Why redeploy
+The frontend build gets its API origin from `VITE_API_BASE`, set in
+`render.yaml` to `https://sales-backend.onrender.com`. The backend allows the
+matching static site origin, `https://sokolink-frontend.onrender.com`, through
+`CORS_ORIGINS`; `FRONTEND_URL` is also set to that origin. If either Render
+service is renamed or assigned a custom domain, update both values and the
+frontend's `VITE_API_BASE` together. Do not add a trailing slash requirement;
+the frontend normalizes it.
 
-- Render reads `render.yaml` at deploy time. After pushing `render.yaml` you must redeploy the `sales-backend` service (or re-trigger a build) so the environment variable `CORS_ORIGINS` on the running service includes the new values. Without redeploy the running service may still use the old `CORS_ORIGINS`.
+### Required Render configuration
 
-Steps to validate after redeploy
+The Blueprint provisions `DATABASE_URL` from its managed PostgreSQL database
+and generates `APP_SECRET_KEY`. Configure or verify these values in the Render
+dashboard before production traffic:
 
-1. Visit the frontend site (GitHub Pages, Render static site, or Netlify). Open browser DevTools → Network. Make an API request (page action). Verify the API response includes `Access-Control-Allow-Origin` matching the frontend origin and `Access-Control-Allow-Credentials: true` if you rely on cookies.
+- `APP_ENV=production`.
+- `DATABASE_URL` must point to the intended persistent managed PostgreSQL
+  database. Back it up before any migration.
+- `APP_SECRET_KEY` must remain stable across deploys and be treated as a secret.
+- `CORS_ORIGINS` must contain only the exact browser origins in use; keep
+  `FRONTEND_URL` synchronized.
+- `SUPABASE_URL` and `SUPABASE_JWKS_URL` are configured by the Blueprint.
+  `SUPABASE_DATABASE_URL` is optional and should only be set if the application
+  integration requires it.
+- Configure `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and
+  `SMTP_FROM_EMAIL` in Render if verification and notification email delivery
+  is required. Do not put secret values in this repository.
+- Configure payment-provider credentials and webhook URLs only after the
+  respective provider integration is validated for production. The repository
+  does not prove that live payment processing is ready.
+- `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are public frontend
+  configuration, not service-role secrets. Never put a Supabase service key in
+  a `VITE_*` variable.
 
-2. Test backend health endpoint:
+The API startup does not create tables, seed demo records, or patch schema.
+Production schema changes must be applied with Alembic after a reviewed backup
+and migration plan. Before the first production upgrade:
+
+1. Identify the exact Render database and take a restorable backup. Record the
+   current Alembic revision (or confirm that the database has no version table)
+   and inventory the live tables and columns.
+2. Compare the live schema with the baseline migration and each pending
+   revision. The baseline (`20260428_01`) creates model tables from metadata
+   inside Alembic; do not treat it as a harmless no-op on an existing database.
+3. Review data effects and revise/replace a migration if needed. In particular,
+   `43811e82f398` drops legacy columns from `sales` when present. Preserve any
+   required values before dropping those columns.
+4. Restore the backup to a staging database, rehearse the exact upgrade path,
+   validate application reads/writes and row counts, then schedule production
+   application with an explicit rollback/restore plan.
+
+Do not configure an automatic deploy-time migration until this review is
+complete. No production database was inspected or changed as part of this work;
+therefore its Alembic version, schema compatibility, and backup restorability
+remain unknown.
+
+## GitHub Pages
+
+The GitHub Pages deploy workflow has been removed because Render is the selected
+primary host. If Pages is enabled in repository settings, disable it there or
+change its source to avoid publishing stale builds. This repository change
+cannot alter GitHub repository settings.
+
+`railway.toml` and `netlify.toml` remain secondary configuration artifacts;
+they are not the selected deployment target and their live configuration is
+unverified. The frontend uses an explicit `VITE_API_BASE` override for custom
+domains or alternate hosts.
+
+## Deployment verification
+
+After configuring and deploying services, check the API and browser behavior:
 
 ```bash
-curl -i https://<your-backend-host>/healthz
+curl -i https://sales-backend.onrender.com/healthz
 ```
 
-Expect `200 OK` and JSON `{"status": "ok", "database": "connected"}`.
+Expect HTTP 200 and a healthy database status. From the deployed frontend,
+inspect a browser API request and verify the response has an
+`Access-Control-Allow-Origin` matching the frontend origin. Cookie-based
+requests also require credentials to be allowed and secure cookie settings
+appropriate for HTTPS. Confirm database backups and restore procedures through
+the Render database controls before accepting production data.
 
-3. If you use GitHub Actions to build the frontend (Pages), ensure the secret `VITE_API_BASE` is set to your backend base URL in repository Settings → Secrets so the built frontend calls the correct API.
-
-4. If you use Netlify or Render for the static frontend, ensure the environment variable `VITE_API_BASE` points to the backend URL returned by your host.
-
-Notes and troubleshooting
-
-- Do NOT include `*` in `CORS_ORIGINS` while `allow_credentials=True` — browsers will block Set-Cookie in that case.
-- If your frontend and backend are on different origins and you use cookie auth, ensure cookies use `SameSite=None; Secure` and your HTTPS setup is correct.
-
-If you want I can:
-- Re-run a hosted validation by making requests to your deployed backend and reporting headers (needs a public URL), or
-- Update your GitHub Actions / Netlify environment var files to ensure `VITE_API_BASE` is set correctly.
+The live service URLs, Render environment values, CORS response, database
+health, backup policy, and Pages repository setting remain unverified until an
+operator checks the deployed project.

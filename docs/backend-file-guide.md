@@ -61,7 +61,7 @@ how revenue is calculated, look in the service helper rather than in the router.
 
 | Path | Purpose |
 | --- | --- |
-| `backend/api/` | Application composition, gateway-only routes, startup seeding and schema safety patches. |
+| `backend/api/` | Application composition and gateway-only routes. Startup does not seed or patch the database schema. |
 | `backend/services/` | Business capabilities: identity, sellers, catalog, orders, payments, delivery, notifications, intelligence and disputes. |
 | `backend/shared/` | Database setup, SQLAlchemy models, shared request/response schemas and small utilities. |
 | `backend/scripts/` | Operational scripts for bootstrapping, DDL export and Supabase synchronisation. |
@@ -103,8 +103,8 @@ The entry point of the backend. It:
 - installs the shared rate limiter from the identity service;
 - mounts `backend/uploads` at `/uploads`;
 - includes every service router and gateway router;
-- on startup, creates tables for local databases, runs lightweight schema
-  patches, and seeds demo marketplace data.
+- uses an empty lifespan: migrations and account/data setup are explicit
+  operator actions, not API startup side effects.
 
 **Start here when:** you are adding a new router to the application, changing
 CORS, changing startup behaviour, or debugging why a route is not reachable.
@@ -112,30 +112,23 @@ CORS, changing startup behaviour, or debugging why a route is not reachable.
 ### `backend/api/README.md`
 
 Short operator/developer notes for the gateway package. It explains the roles of
-`main.py`, `routers/`, `schema.py` and `seed.py`, plus the local run command.
+`main.py`, `routers/`, and the legacy compatibility helper, plus the local run command.
 
 ### `backend/api/schema.py`
 
-A transitional "schema safety net". On startup it checks existing tables and
-adds missing columns that were introduced after a database was originally
-created. It supports both SQLite and PostgreSQL.
+A legacy schema patch helper retained for tests and compatibility references.
+Production startup does not import or call it. New permanent schema changes
+must use Alembic; do not reintroduce this helper into application startup.
 
-New permanent schema changes belong in Alembic migrations. This file exists so
-older local databases and deployed databases do not break before a migration is
-applied.
+Do not add production startup behavior here. Permanent database changes belong
+in a reviewed Alembic migration.
 
-**Touch this when:** you need a small compatibility patch for an existing
-database. Do not use it as the primary schema-management mechanism.
+### Demo data and `backend/api/seed.py`
 
-### `backend/api/seed.py`
-
-Creates demo data the first time the application starts with an empty product
-catalogue. It seeds demo sellers, a demo supplier, demo products, business
-metrics, and then links products to sellers where necessary. The goal is a
-usable marketplace immediately after local setup.
-
-**Touch this when:** local demo data is missing or you want a new safe demo
-fixture for development. Keep it idempotent.
+The former demo seeder has been removed. API startup creates no sample users,
+sellers, products, or sales. Tests should create only the fixtures they need;
+development accounts should be provisioned through an explicit bootstrap
+workflow rather than hardcoded demo credentials.
 
 ### `backend/api/routers/__init__.py`
 
@@ -235,8 +228,8 @@ SQLAlchemy ORM model, including:
 - **AI assistant:** `AssistantConversation`, `AssistantConversationMessage`.
 - **Legacy customer records:** `Customer`.
 
-**Touch this when:** you add or change a persistent field/table. Also add an
-Alembic migration and, if needed, a compatibility patch in `api/schema.py`.
+**Touch this when:** you add or change a persistent field/table. Add a reviewed
+Alembic migration; the legacy helper is not part of production startup.
 
 ### `backend/shared/schemas/__init__.py`
 
@@ -718,7 +711,7 @@ files and never commit them. They can be deleted safely.
 | Add a seller workspace endpoint | `backend/services/sellers/workspace.py` |
 | Change an order status rule | `backend/services/orders/order_state.py` |
 | Change checkout, cancellation or receipt behaviour | `backend/services/orders/sales.py` |
-| Add a database field or table | `backend/shared/models.py`, then an Alembic migration, then `backend/api/schema.py` only if compatibility patching is needed |
+| Add a database field or table | `backend/shared/models.py` and a reviewed Alembic migration |
 | Change login, roles or permissions | `backend/services/identity/auth.py` and `backend/services/identity/identity_service.py` |
 | Add a payment provider | `backend/services/payments/providers/` and register it in `providers/__init__.py` |
 | Change payment settlement behaviour | `backend/services/payments/payments.py` |
@@ -726,7 +719,7 @@ files and never commit them. They can be deleted safely.
 | Change dashboards or analytics | `backend/services/intelligence/dashboard.py` and `analysis/sales_analysis.py` |
 | Change the AI assistant's behaviour | `backend/services/intelligence/ai_assistant.py` plus the Markdown files under `assistant_knowledge/` |
 | Change delivery tracking | `backend/services/delivery/logistics.py` and `backend/shared/utils/geo.py` |
-| Seed local demo data | `backend/api/seed.py` |
+| Add test data | Test-local fixtures; there is no application demo seeder |
 
 ## Conventions to keep in mind
 
@@ -739,7 +732,7 @@ files and never commit them. They can be deleted safely.
 4. **Use the notification service.** Avoid writing notification rows by hand in
    feature code.
 5. **Use Alembic for permanent schema changes.** `api/schema.py` and
-   `scripts/init_db.py` are compatibility tools, not a replacement for
+   `scripts/init_db.py` are legacy compatibility tools, not a replacement for
    migrations.
 6. **Keep imports pointing downward.** Services may import from `backend.shared`;
    services should not import from `backend.api`.

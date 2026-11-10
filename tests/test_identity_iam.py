@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import app
 from backend.shared.database import SessionLocal, engine
-from backend.shared.models import Base, Identity, User
+from backend.shared.models import Base, Identity, RefreshToken, User
 from backend.services.identity.auth import limiter
 
 
@@ -199,10 +199,30 @@ def test_refresh_tokens_rotate_and_old_token_is_revoked(client, db, caplog):
     new_refresh = rotated.cookies.get("refresh_token")
     assert new_refresh and new_refresh != old_refresh
 
-    reused = client.post("/auth/refresh", cookies={"refresh_token": old_refresh})
+    old_record = db.query(RefreshToken).filter(RefreshToken.token == old_refresh).one()
+    db.refresh(old_record)
+    assert old_record.is_revoked is True
+    assert old_record.revoked_at is not None
+
+    new_record = db.query(RefreshToken).filter(RefreshToken.token == new_refresh).one()
+    db.refresh(new_record)
+    assert new_record.is_revoked is False
+
+    # TestClient persists Set-Cookie headers. Use a fresh jar so the stale-token
+    # request cannot silently send the newly rotated token instead.
+    with TestClient(app) as stale_client:
+        reused = stale_client.post(
+            "/auth/refresh",
+            headers={"Cookie": f"refresh_token={old_refresh}"},
+        )
+    assert reused.request.headers.get("cookie") == f"refresh_token={old_refresh}"
     assert reused.status_code == 401
 
-    current = client.post("/auth/refresh", cookies={"refresh_token": new_refresh})
+    with TestClient(app) as current_client:
+        current = current_client.post(
+            "/auth/refresh",
+            headers={"Cookie": f"refresh_token={new_refresh}"},
+        )
     assert current.status_code == 200
 
 

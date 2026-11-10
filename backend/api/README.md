@@ -6,9 +6,10 @@
   uploads and includes service routers.
 - `routers/` contains gateway-owned endpoints: health, marketplace trends,
   superadmin operations, analytics and frontend serving.
-- `schema.py` is a transitional schema safety net. New schema changes belong in
-  Alembic.
-- `seed.py` inserts demo marketplace data on startup when the database is empty.
+- `main.py` does not create or patch database schema and does not seed demo
+  records. Apply schema changes explicitly with Alembic.
+- `schema.py` is a legacy compatibility helper retained for tests; do not call
+  it from production startup. The former demo seeder was removed.
 
 Run the gateway with:
 

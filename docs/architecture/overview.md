@@ -18,8 +18,7 @@ soko-link/
 ├── backend/
 │   ├── api/                  # FastAPI gateway / composition root
 │   │   ├── main.py           # App factory, CORS, lifespan, router wiring
-│   │   ├── schema.py         # Transitional schema safety net
-│   │   ├── seed.py           # Demo data bootstrap
+│   │   ├── schema.py         # Legacy helper; not called at startup
 │   │   └── routers/          # Gateway-owned cross-cutting endpoints
 │   ├── services/             # Business capabilities
 │   │   ├── identity/         # Auth, users, customers, Supabase bridging
@@ -89,6 +88,10 @@ PostgreSQL (single database today)
    response contracts must not change unless a migration is deliberate.
 6. **Every move is verified by tests.** The regression suite is the safety net
    for structural changes.
+
+API startup does not create or patch schema and does not seed demo data. Apply
+production schema changes with reviewed Alembic migrations. The old demo seed
+module has been removed.
 
 ## Current deployment model
 
