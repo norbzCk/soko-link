@@ -19,8 +19,13 @@ make backend    # FastAPI gateway with reload
 make frontend   # Vite dev server
 make test       # backend regression suite
 make check      # Python compile check
-make up         # Docker Compose stack
+podman compose up -d db
+alembic upgrade head
+podman compose up --build -d
 ```
+
+See [PostgreSQL and initial accounts](postgresql-development.md) for the
+environment settings, account bootstrap, backup, and restore commands.
 
 ## CORS and cookies
 
@@ -30,8 +35,8 @@ make up         # Docker Compose stack
 
 ## Troubleshooting
 
-- **Database errors:** force SQLite with
-  `DATABASE_URL=sqlite:///./dev.db` or start PostgreSQL with `make up`.
+- **Database errors:** start the local database with `podman compose up -d db`
+  and check `podman compose logs db`.
 - **Frontend cannot reach API:** check `VITE_API_BASE` and `CORS_ORIGINS`.
-- **Schema mismatch:** the startup bootstrap patches known legacy columns;
-  future schema changes should be Alembic migrations.
+- **Schema mismatch:** apply schema changes with `alembic upgrade head` and
+  manage future changes through Alembic migrations.

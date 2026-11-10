@@ -1,16 +1,24 @@
 import os
+from pathlib import Path
 from urllib.parse import quote_plus, urlparse, urlunparse
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 
 def get_database_url():
-    db_user = os.getenv("DB_USER", "postgres")
-    db_pass = os.getenv("DB_PASSWORD", "postgres123")
+    db_user = os.getenv("DB_USER", "sokolink_user")
+    db_pass = os.getenv("DB_PASSWORD", "")
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME", "sales_db")
+    db_name = os.getenv("DB_NAME", "sokolink_db")
+
+    if not db_pass:
+        raise RuntimeError("DB_PASSWORD or DATABASE_URL must be configured for PostgreSQL.")
 
     password = quote_plus(db_pass)
     return f"postgresql+psycopg2://{db_user}:{password}@{db_host}:{db_port}/{db_name}"
@@ -37,8 +45,7 @@ def resolve_database_url() -> str:
     if os.getenv("DB_HOST") or os.getenv("DB_USER"):
         return _ensure_ssl_mode(get_database_url())
 
-    # Default to local SQLite database for out-of-the-box zero-setup development
-    return "sqlite:///./dev.db"
+    return _ensure_ssl_mode(get_database_url())
 
 
 def _ensure_ssl_mode(url: str) -> str:

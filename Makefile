@@ -3,6 +3,7 @@
 VENV ?= .venv
 PYTHON = $(VENV)/bin/python
 UVICORN = $(VENV)/bin/uvicorn
+CONTAINER_COMPOSE ?= podman compose
 NPM ?= $(shell which npm 2>/dev/null || (which flatpak-spawn >/dev/null 2>&1 && echo "flatpak-spawn --host npm") || echo "npm")
 
 help:
@@ -13,10 +14,10 @@ help:
 	@echo "  make frontend         - Run the Vite frontend"
 	@echo "  make test             - Run the backend test suite"
 	@echo "  make check            - Compile-check Python sources"
-	@echo "  make build            - Build Docker images"
-	@echo "  make up / down        - Start / stop Docker services"
-	@echo "  make logs             - Follow Docker logs"
-	@echo "  make clean            - Remove containers and volumes"
+	@echo "  make build            - Build container images"
+	@echo "  make up / down        - Start / stop Compose services"
+	@echo "  make logs             - Follow Compose logs"
+	@echo "  make clean            - Remove this Compose project's containers"
 	@echo "  make supabase-schema  - Export SQL schema for Supabase"
 	@echo "  make supabase-push    - Sync local DB -> Supabase"
 	@echo "  make supabase-pull    - Sync Supabase -> local DB"
@@ -40,28 +41,30 @@ frontend:
 	cd frontend && $(NPM) run dev -- --host 0.0.0.0
 
 test:
-	PYTHONPATH=. DATABASE_URL=sqlite:///./test.db $(PYTHON) -m pytest -q
+	@SOKO_TEST_DIR=$$(mktemp -d /tmp/sokolink-tests-XXXXXX); \
+	trap 'rm -rf "$$SOKO_TEST_DIR"' EXIT; \
+	PYTHONPATH=. DATABASE_URL="sqlite:///$$SOKO_TEST_DIR/test.db" $(PYTHON) -m pytest -q
 
 check:
 	$(PYTHON) -m compileall -q backend tests alembic
 
 build:
-	docker compose build
+	$(CONTAINER_COMPOSE) build
 
 up:
-	docker compose up -d
+	$(CONTAINER_COMPOSE) up -d
 
 down:
-	docker compose down
+	$(CONTAINER_COMPOSE) down
 
 restart:
-	docker compose restart
+	$(CONTAINER_COMPOSE) restart
 
 logs:
-	docker compose logs -f
+	$(CONTAINER_COMPOSE) logs -f
 
 clean:
-	docker compose down -v
+	$(CONTAINER_COMPOSE) down
 
 supabase-push:
 	$(PYTHON) -m backend.scripts.supabase_sync push

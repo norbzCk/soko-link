@@ -67,14 +67,19 @@ cp .env.example .env
 ### Run the backend
 
 ```bash
-DATABASE_URL=sqlite:///./dev.db .venv/bin/uvicorn backend.api.main:app --reload --port 8000
+podman compose up -d db
+alembic upgrade head
+.venv/bin/uvicorn backend.api.main:app --reload --port 8000
 ```
 
 - API: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
 - Health: `http://localhost:8000/healthz`
 
-First startup seeds demo marketplace data.
+API startup does not seed marketplace data. Configure the three initial
+accounts in `.env` and run `python -m backend.scripts.bootstrap_users` once
+after applying migrations. See [Local PostgreSQL and initial accounts](docs/postgresql-development.md)
+for setup, account verification, database operations, and backups.
 
 ### Run the frontend
 
@@ -92,10 +97,13 @@ Open `http://localhost:5173`. The local frontend defaults to the API at
 make test
 ```
 
-Or directly:
+The test target creates a fresh temporary database under `/tmp` and removes it
+after the suite completes. To run the suite directly:
 
 ```bash
-DATABASE_URL=sqlite:///./test.db .venv/bin/python -m pytest -q
+SOKO_TEST_DIR=$(mktemp -d /tmp/sokolink-tests-XXXXXX)
+DATABASE_URL="sqlite:///$SOKO_TEST_DIR/test.db" .venv/bin/python -m pytest -q
+rm -rf "$SOKO_TEST_DIR"
 ```
 
 The suite covers auth, products, orders, payments, delivery, notifications,
@@ -130,7 +138,7 @@ SMTP is configured and otherwise require an external SMS integration.
 ## Docker
 
 ```bash
-docker compose up --build
+podman compose up --build
 ```
 
 - Frontend: `http://localhost:8080`
@@ -141,7 +149,7 @@ docker compose up --build
 
 Copy `.env.example` and set at least:
 
-- `DATABASE_URL` — database connection string
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` — local PostgreSQL connection settings
 - `APP_SECRET_KEY` — long random secret used to sign JWTs
 - `CORS_ORIGINS` — comma-separated allowed frontend origins
 - `FRONTEND_URL` — public frontend URL used in verification/reset links

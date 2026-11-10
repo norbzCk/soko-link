@@ -10,8 +10,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-from backend.shared.models import Base
-
 revision: str = "7c9d2e4f8a10"
 down_revision: Union[str, Sequence[str], None] = "5b1c2d3e4f60"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -32,9 +30,6 @@ def _add(table: str, column: str, definition: str) -> None:
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    Base.metadata.create_all(bind=bind)
-
     _add("products", "status", "status VARCHAR DEFAULT 'approved'")
     _add("products", "moderation_reason", "moderation_reason TEXT")
     _add("products", "submitted_at", "submitted_at TIMESTAMPTZ")

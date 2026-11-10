@@ -9,7 +9,7 @@
 
 - Python 3.11+
 - Node.js 20+ and npm
-- PostgreSQL 15 (or SQLite for local tests)
+- PostgreSQL 16 through Docker Compose
 
 ## First-time setup
 
@@ -25,11 +25,14 @@ cp .env.example .env
 ## Run the backend
 
 ```bash
-DATABASE_URL=sqlite:///./dev.db .venv/bin/uvicorn backend.api.main:app --reload --port 8000
+docker compose up -d db
+alembic upgrade head
+.venv/bin/uvicorn backend.api.main:app --reload --port 8000
 ```
 
-The first startup seeds demo marketplace data. API docs are at
-`http://localhost:8000/docs`.
+API startup does not create schema or seed demo records. Use the operator-run
+bootstrap described in [PostgreSQL setup](../postgresql-development.md) to
+create the three initial accounts. API docs are at `http://localhost:8000/docs`.
 
 ## Run the frontend
 
@@ -44,13 +47,15 @@ Open the Vite URL (normally `http://localhost:5173`). The frontend defaults to
 ## Tests
 
 ```bash
-DATABASE_URL=sqlite:///./test.db .venv/bin/python -m pytest -q
+make test
 ```
 
 Target a single capability while iterating, for example:
 
 ```bash
-DATABASE_URL=sqlite:///./test.db .venv/bin/python -m pytest -q tests/test_payments.py
+SOKO_TEST_DIR=$(mktemp -d /tmp/sokolink-tests-XXXXXX)
+DATABASE_URL="sqlite:///$SOKO_TEST_DIR/test.db" .venv/bin/python -m pytest -q tests/test_payments.py
+rm -rf "$SOKO_TEST_DIR"
 ```
 
 ## Adding a backend capability
