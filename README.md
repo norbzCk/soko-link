@@ -23,6 +23,8 @@ Contributors must start from the current implementation, not rebuild it:
   rules, catalogue, finance and security behaviour.
 - [docs/rbac-permissions.md](docs/rbac-permissions.md) — role matrix,
   verification and moderation permissions.
+- [docs/backend-file-guide.md](docs/backend-file-guide.md) — plain-language
+  guide to every backend file and where to make changes.
 
 See [docs/architecture/overview.md](docs/architecture/overview.md) for the
 detailed repository and request-flow documentation.
