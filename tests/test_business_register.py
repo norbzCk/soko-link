@@ -68,7 +68,7 @@ class TestBusinessRegister:
 
         admin = client.post("/auth/login", json={
             "email": "superadmin@gmail.com",
-            "password": "adminkey",
+            "password": "TestAdmin!2026",
         })
         admin_headers = {"Authorization": f"Bearer {admin.json()['access_token']}"}
         applications = client.get("/auth/admin/applications?status=PENDING", headers=admin_headers).json()

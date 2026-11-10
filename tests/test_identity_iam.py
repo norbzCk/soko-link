@@ -54,7 +54,7 @@ def register_and_verify(client, caplog, email="iam@example.com", phone="+2557000
 def superadmin_headers(client):
     response = client.post("/auth/login", json={
         "email": "superadmin@gmail.com",
-        "password": "adminkey",
+        "password": "TestAdmin!2026",
     })
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}

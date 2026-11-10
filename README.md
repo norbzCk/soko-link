@@ -146,7 +146,7 @@ Copy `.env.example` and set at least:
 - `CORS_ORIGINS` — comma-separated allowed frontend origins
 - `FRONTEND_URL` — public frontend URL used in verification/reset links
 - `APP_ENV` — `development` or `production`
-- `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` — bootstrap superadmin credentials
+- `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD`, `INITIAL_SELLER_*`, and `INITIAL_CUSTOMER_*` — operator-supplied initial-account settings
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
   `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_USE_TLS` — email delivery
 - `VITE_API_BASE` — frontend API base URL

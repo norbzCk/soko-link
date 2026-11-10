@@ -84,14 +84,14 @@ EMAIL_VERIFICATION_OTP_PURPOSE = "email_verification_otp"
 REGISTRATION_OTP_TTL_SECONDS = 60 * 10
 EMAIL_OTP_MAX_ATTEMPTS = 5
 PHONE_OTP_TTL_SECONDS = 60 * 10
-SECRET_KEY = os.getenv("APP_SECRET_KEY", "change-me-in-production")
+SECRET_KEY = os.getenv("APP_SECRET_KEY", "").strip()
+if len(SECRET_KEY) < 32:
+    raise RuntimeError("APP_SECRET_KEY must be configured with at least 32 characters.")
 ALGORITHM = "HS256"
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 APP_ENV = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 
-SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "superadmin@gmail.com").strip().lower()
-SUPERADMIN_PASSWORD = os.getenv("SUPERADMIN_PASSWORD", "adminkey")
 
 security = HTTPBearer(auto_error=False)
 limiter = Limiter(key_func=get_remote_address)
@@ -305,7 +305,14 @@ def _choose_active_role(db: Session, identity: Identity, requested_role: str | N
             raise HTTPException(status_code=403, detail="You do not have access to that role.")
         return requested
 
-    for preferred in (ROLE_CUSTOMER, ROLE_SELLER, ROLE_LOGISTICS_PROVIDER, ROLE_ADMINISTRATOR, ROLE_ANALYST):
+    for preferred in (
+        ROLE_SUPER_ADMIN,
+        ROLE_CUSTOMER,
+        ROLE_SELLER,
+        ROLE_LOGISTICS_PROVIDER,
+        ROLE_ADMINISTRATOR,
+        ROLE_ANALYST,
+    ):
         if preferred in approved:
             return preferred
     return approved[0]
@@ -584,19 +591,6 @@ def _get_user_by_id(db: Session, user_id: int) -> User:
     return user
 
 
-def _build_superadmin_user() -> User:
-    return User(
-        id=0,
-        name="Super Admin",
-        email=SUPERADMIN_EMAIL,
-        phone=None,
-        address=None,
-        role="super_admin",
-        is_active=True,
-        is_verified=True,
-    )
-
-
 def _normalize_identifier(value: str | None) -> str:
     return (value or "").strip()
 
@@ -636,10 +630,6 @@ def _phone_matches(stored: str | None, provided: str | None) -> bool:
     stored_digits = _normalize_phone(stored)
     provided_digits = _normalize_phone(provided)
     return bool(stored_digits and provided_digits and stored_digits == provided_digits)
-
-
-def _superadmin_matches(email: str | None, password: str | None) -> bool:
-    return _normalize_email(email) == SUPERADMIN_EMAIL and (password or "") == SUPERADMIN_PASSWORD
 
 
 def _find_recovery_account(db: Session, identifier: str):
@@ -731,10 +721,8 @@ def _resolve_user_from_payload(
     db: Session,
     payload: dict,
 ) -> User | BusinessUser | LogisticsUser:
-    if payload.get("user_type") == "superadmin" or (
-        _normalize_role(payload.get("role")) == "super_admin" and str(payload.get("sub", "")) == "0"
-    ):
-        return _build_superadmin_user()
+    if payload.get("user_type") == "superadmin" or str(payload.get("sub", "")) == "0":
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     user_type = payload.get("user_type")
     if user_type == "business":
@@ -1148,61 +1136,6 @@ def login(
             "logistics": ROLE_LOGISTICS_PROVIDER,
         }.get(str(payload.get("user_type") or "").lower())
 
-    if _superadmin_matches(email, password):
-        temp_user = _build_superadmin_user()
-        recipient_type, recipient_id, recipient_email, recipient_name = resolve_subject(temp_user)
-        subject, body = build_login_email(
-            recipient_name,
-            "super admin",
-            request.client.host if request.client else None,
-            request.headers.get("user-agent"),
-        )
-        create_notification(
-            db,
-            recipient_type=recipient_type,
-            recipient_id=recipient_id,
-            recipient_email=recipient_email,
-            title="Superadmin login detected",
-            message="A superadmin session was opened successfully.",
-            notification_type="security",
-            severity="warning",
-            action_href="/app/superadmin",
-            send_email=bool(recipient_email),
-            email_subject=subject,
-            email_body=body,
-            background_tasks=background_tasks,
-        )
-        token = create_access_token(
-            data={
-                "sub": 0,
-                "role": "super_admin",
-                "active_role": ROLE_SUPER_ADMIN,
-                "roles": [ROLE_SUPER_ADMIN],
-                "email": SUPERADMIN_EMAIL,
-                "user_type": "superadmin",
-            }
-        )
-        refresh_token = create_refresh_token(0, "superadmin", db, active_role=ROLE_SUPER_ADMIN)
-        set_auth_cookies(response, token, refresh_token)
-        db.commit()
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "userType": "superadmin",
-            "user_type": "superadmin",
-            "user": {
-                "id": 0,
-                "name": "Super Admin",
-                "email": SUPERADMIN_EMAIL,
-                "role": "super_admin",
-                "active_role": ROLE_SUPER_ADMIN,
-                "roles": [ROLE_SUPER_ADMIN],
-                "is_active": True,
-            },
-            "roles": [ROLE_SUPER_ADMIN],
-            "active_role": ROLE_SUPER_ADMIN,
-        }
-
     identity = None
     if email:
         identity = db.query(Identity).filter(func.lower(Identity.email) == email).first()
@@ -1324,8 +1257,6 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         user = db.query(BusinessUser).filter(BusinessUser.id == db_token.user_id).first()
     elif db_token.user_type == "logistics":
         user = db.query(LogisticsUser).filter(LogisticsUser.id == db_token.user_id).first()
-    elif db_token.user_type == "superadmin":
-        user = _build_superadmin_user()
     else:
         user = db.query(User).filter(User.id == db_token.user_id).first()
 

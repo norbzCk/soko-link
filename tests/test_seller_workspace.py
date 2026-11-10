@@ -33,7 +33,7 @@ def seller_headers(seller):
 def admin_headers(client):
     response = client.post(
         "/auth/login",
-        json={"email": "superadmin@gmail.com", "password": "adminkey"},
+        json={"email": "superadmin@gmail.com", "password": "TestAdmin!2026"},
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
